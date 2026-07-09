@@ -1,0 +1,111 @@
+import { app, BrowserWindow, ipcMain } from "electron";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+/** 本地状态文件名，用于保存主题和发布配置。 */
+const stateFileName = "visual-muse-state.json";
+
+/**
+ * 获取状态文件路径；无参数，返回 Electron userData 目录下的 JSON 文件路径。
+ */
+function getStateFilePath(): string {
+  // 用户数据目录路径，保存 Electron 为当前应用分配的本地数据目录。
+  const userDataPath = app.getPath("userData");
+
+  return path.join(userDataPath, stateFileName);
+}
+
+/**
+ * 读取本地状态；无参数，返回保存过的主题和发布配置。
+ */
+async function readStoredState(): Promise<unknown | null> {
+  // 状态文件路径，保存本地 JSON 状态的位置。
+  const stateFilePath = getStateFilePath();
+
+  try {
+    // 状态文件内容，保存从磁盘读取到的 JSON 字符串。
+    const rawState = await fs.readFile(stateFilePath, "utf-8");
+
+    return JSON.parse(rawState) as unknown;
+  } catch (error) {
+    // 业务场景：第一次启动没有状态文件，应返回空状态而不是报错。
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
+/**
+ * 写入本地状态；`state` 是来自渲染进程的主题和发布配置。
+ */
+async function writeStoredState(state: unknown): Promise<void> {
+  // 状态文件路径，保存本地 JSON 状态的位置。
+  const stateFilePath = getStateFilePath();
+  // 状态目录路径，保存状态文件所在目录。
+  const stateDirPath = path.dirname(stateFilePath);
+
+  await fs.mkdir(stateDirPath, { recursive: true });
+  await fs.writeFile(stateFilePath, JSON.stringify(state, null, 2), "utf-8");
+}
+
+/**
+ * 注册 IPC 存储接口；无参数，提供渲染进程安全读写本地状态的能力。
+ */
+function registerIpcHandlers(): void {
+  ipcMain.handle("visual-muse:get-state", async () => readStoredState());
+  ipcMain.handle("visual-muse:set-state", async (_event, state: unknown) => writeStoredState(state));
+}
+
+/**
+ * 创建 Electron 主窗口；无参数，负责加载开发服务器或打包后的静态页面。
+ */
+function createWindow(): void {
+  // 当前模块文件路径，用于推导 preload 脚本位置。
+  const currentFilePath = fileURLToPath(import.meta.url);
+  // 当前模块目录路径，用于定位构建产物。
+  const currentDirPath = path.dirname(currentFilePath);
+  // 主窗口实例，承载 Visual Muse 渲染进程。
+  const mainWindow = new BrowserWindow({
+    width: 1440,
+    height: 940,
+    minWidth: 1120,
+    minHeight: 720,
+    title: "Visual Muse",
+    backgroundColor: "#020617",
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      preload: path.join(currentDirPath, "preload.js"),
+    },
+  });
+
+  // 开发环境加载 Vite 服务，生产环境加载本地 HTML。
+  if (process.env.VITE_DEV_SERVER_URL) {
+    void mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
+  } else {
+    void mainWindow.loadFile(path.join(currentDirPath, "../dist/index.html"));
+  }
+}
+
+registerIpcHandlers();
+
+void app.whenReady().then(() => {
+  createWindow();
+
+  app.on("activate", () => {
+    // macOS 业务场景：Dock 图标唤起时，如果没有窗口则重新创建。
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow();
+    }
+  });
+});
+
+app.on("window-all-closed", () => {
+  // macOS 业务场景：保留应用生命周期，其它平台关闭全部窗口后退出。
+  if (process.platform !== "darwin") {
+    app.quit();
+  }
+});
