@@ -19,6 +19,13 @@ interface VisualMuseStoreState {
 }
 
 interface Window {
+  /** Electron preload 暴露的剪贴板与平台入口 API。 */
+  visualMuseDesktop?: {
+    /** 复制文本到系统剪贴板；`text` 是待复制内容。 */
+    copyText: (text: string) => Promise<void>;
+    /** 打开平台创作入口；`platformId` 是平台标识。 */
+    openPublisher: (platformId: string) => Promise<void>;
+  };
   /** Electron preload 暴露的本地状态存储 API。 */
   visualMuseStore?: {
     /** 读取本地状态；无参数，返回主题和发布配置。 */

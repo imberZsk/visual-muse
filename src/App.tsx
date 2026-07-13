@@ -1,16 +1,19 @@
 import {
   Alert,
-  Badge,
   Button,
   ConfigProvider,
   Divider,
+  Empty,
   Form,
   Input,
+  message,
+  Skeleton,
   Select,
   Space,
   Switch,
   Tag,
   Timeline,
+  Tooltip,
   Typography,
   theme,
 } from "antd";
@@ -27,6 +30,10 @@ import {
   Send,
   Server,
   Settings,
+  Check,
+  Cloud,
+  Copy,
+  ExternalLink,
   Sun,
   WandSparkles,
 } from "lucide-react";
@@ -84,8 +91,40 @@ interface PreviewPanelProps {
   wechatPayload: WechatDraftPayload;
 }
 
+interface ContentPlatformOptions {
+  /** 平台文章分类，用于发布前记录目标内容频道。 */
+  category: string;
+  /** 平台文章标签，用逗号分隔。 */
+  tags: string;
+  /** 平台文章摘要，用于复制到平台发布表单。 */
+  summary: string;
+}
+
 /** 本地状态存储键，用于浏览器预览和测试环境降级持久化。 */
 const browserStateKey = "visual-muse-state";
+
+/** 自动保存延迟毫秒数，用于合并用户连续输入产生的磁盘写入。 */
+const autoSaveDelayMs = 500;
+
+/** 模拟发布延迟毫秒数，用于呈现真实异步发布过程的交互状态。 */
+const simulatedPublishDelayMs = 650;
+
+/** 平台创作入口地址，用于 Web 预览环境降级打开官方发布页面。 */
+const publisherUrlMap: Record<PlatformId, string> = {
+  wechat: "https://mp.weixin.qq.com/",
+  zhihu: "https://www.zhihu.com/creator",
+  toutiao: "https://mp.toutiao.com/",
+  juejin: "https://juejin.cn/editor/drafts/new?v=2",
+  csdn: "https://editor.csdn.net/md/",
+  medium: "https://medium.com/new-story",
+};
+
+/** 默认内容平台选项，用于初始化分类、标签和摘要。 */
+const defaultContentOptions: ContentPlatformOptions = {
+  category: "",
+  tags: "",
+  summary: "",
+};
 
 /** 默认示例文章，用于应用首次打开时展示可发布内容。 */
 const defaultMarkdown = `---
@@ -264,6 +303,8 @@ function escapeHtml(value: string): string {
  * Visual Muse 根组件；无参数，负责组装编辑、预览、平台和发布状态。
  */
 export default function App() {
+  // 全局消息 API，保存复制和打开平台后的非阻断反馈能力。
+  const [messageApi, messageContextHolder] = message.useMessage();
   // 当前主题模式，保存深色或浅色状态。
   const [themeMode, setThemeMode] = useState<ThemeMode>("dark");
   // 当前选中平台，保存平台导航的 active 项。
@@ -276,6 +317,20 @@ export default function App() {
   const [validation, setValidation] = useState<PublishValidation | null>(null);
   // 发布记录列表，保存最近的模拟发布结果。
   const [publishResults, setPublishResults] = useState<PublishResult[]>([]);
+  // 初始化状态，保存持久化配置是否已经读取完成。
+  const [isHydrated, setIsHydrated] = useState(false);
+  // 自动保存状态，保存配置是否正在写入本地存储。
+  const [isSaving, setIsSaving] = useState(false);
+  // 发布状态，保存模拟发布异步流程是否正在执行。
+  const [isPublishing, setIsPublishing] = useState(false);
+  // 快捷操作状态，保存当前正在执行的复制或打开平台动作。
+  const [activeQuickAction, setActiveQuickAction] = useState<string | null>(null);
+  // 内容平台选项，保存各平台独立的分类、标签和摘要输入。
+  const [contentOptions, setContentOptions] = useState<Record<PlatformId, ContentPlatformOptions>>(() =>
+    Object.fromEntries(
+      publishingPlatforms.map((platform) => [platform.id, { ...defaultContentOptions }]),
+    ) as Record<PlatformId, ContentPlatformOptions>,
+  );
 
   // 当前平台对象，保存由平台 ID 找到的完整平台定义。
   const selectedPlatform = useMemo(
@@ -309,15 +364,25 @@ export default function App() {
     // 组件挂载标记，保存异步加载期间组件是否仍然存在。
     let isMounted = true;
 
-    void loadPersistedState().then((persistedState) => {
-      // 业务场景：没有历史状态时保持默认深色主题和空配置。
-      if (!persistedState || !isMounted) {
-        return;
-      }
+    void loadPersistedState()
+      .then((persistedState) => {
+        // 业务场景：组件卸载后不再更新界面，避免异步状态泄漏。
+        if (!isMounted) {
+          return;
+        }
 
-      setThemeMode(persistedState.themeMode);
-      setSettingsState({ ...defaultSettings, ...persistedState.settings });
-    });
+        // 业务场景：存在历史状态时恢复用户主题和平台配置。
+        if (persistedState) {
+          setThemeMode(persistedState.themeMode);
+          setSettingsState({ ...defaultSettings, ...persistedState.settings });
+        }
+      })
+      .finally(() => {
+        // 业务场景：只有仍挂载的界面才能结束启动状态。
+        if (isMounted) {
+          setIsHydrated(true);
+        }
+      });
 
     /**
      * 清理持久化加载副作用；无参数，用于避免卸载后更新状态。
@@ -328,14 +393,26 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    // 业务场景：持久化读取完成前禁止保存，避免默认值覆盖用户已有配置。
+    if (!isHydrated) {
+      return undefined;
+    }
+
     // 待保存状态，保存主题和发布配置的最新值。
     const nextState: VisualMuseState = {
       themeMode,
       settings: settingsState,
     };
 
-    void savePersistedState(nextState);
-  }, [settingsState, themeMode]);
+    // 自动保存定时器，保存合并连续配置修改所需的延迟任务。
+    const saveTimer = window.setTimeout(() => {
+      setIsSaving(true);
+      void savePersistedState(nextState).finally(() => setIsSaving(false));
+    }, autoSaveDelayMs);
+
+    /** 清理自动保存任务；无参数，用于配置再次变化时取消旧写入。 */
+    return () => window.clearTimeout(saveTimer);
+  }, [isHydrated, settingsState, themeMode]);
 
   /**
    * 切换主题；`checked` 表示是否启用浅色主题。
@@ -375,7 +452,7 @@ export default function App() {
   /**
    * 执行模拟发布；无参数，预检通过后写入发布历史。
    */
-  const handleSimulatePublish = (): void => {
+  const handleSimulatePublish = async (): Promise<void> => {
     // 预检结果，保存模拟发布前的阻断错误和提示。
     const nextValidation = validatePublishTarget(selectedPlatform, parsedArticle);
 
@@ -386,11 +463,87 @@ export default function App() {
       return;
     }
 
-    // 模拟发布结果，保存本次发布成功后的记录。
-    const nextResult = simulatePublish(selectedPlatform, parsedArticle);
+    setIsPublishing(true);
 
-    setPublishResults((currentResults) => [nextResult, ...currentResults].slice(0, 5));
+    try {
+      await new Promise<void>((resolve) => window.setTimeout(resolve, simulatedPublishDelayMs));
+      // 模拟发布结果，保存本次发布成功后的记录。
+      const nextResult = simulatePublish(selectedPlatform, parsedArticle);
+
+      setPublishResults((currentResults) => [nextResult, ...currentResults].slice(0, 5));
+    } finally {
+      setIsPublishing(false);
+    }
   };
+
+  /**
+   * 更新内容平台选项；`field` 是选项字段，`value` 是用户输入值。
+   */
+  const updateContentOption = (field: keyof ContentPlatformOptions, value: string): void => {
+    setContentOptions((currentOptions) => ({
+      ...currentOptions,
+      [selectedPlatformId]: {
+        ...currentOptions[selectedPlatformId],
+        [field]: value,
+      },
+    }));
+  };
+
+  /**
+   * 复制发布内容；`kind` 表示复制标题、正文或完整文章。
+   */
+  const handleCopyContent = async (kind: "title" | "body" | "all"): Promise<void> => {
+    // 当前文章标题，保存复制内容使用的安全标题兜底值。
+    const title = parsedArticle.metadata.title?.trim() || "未命名文章";
+    // 待复制文本，保存本次快捷操作最终写入剪贴板的内容。
+    const copyText = kind === "title" ? title : kind === "body" ? parsedArticle.body : `${title}\n\n${parsedArticle.body}`;
+    // 快捷操作标识，保存按钮 loading 状态对应的唯一键。
+    const actionKey = `copy-${kind}`;
+
+    setActiveQuickAction(actionKey);
+
+    try {
+      // 业务场景：Electron 使用受限 preload API；Web 预览使用标准剪贴板 API。
+      if (window.visualMuseDesktop) {
+        await window.visualMuseDesktop.copyText(copyText);
+      } else {
+        await navigator.clipboard.writeText(copyText);
+      }
+
+      messageApi.success(kind === "title" ? "标题已复制" : kind === "body" ? "正文已复制" : "标题和正文已复制");
+    } catch {
+      messageApi.error("复制失败，请检查系统剪贴板权限");
+    } finally {
+      setActiveQuickAction(null);
+    }
+  };
+
+  /**
+   * 打开当前平台创作入口；无参数，桌面端使用系统浏览器，Web 环境打开新标签页。
+   */
+  const handleOpenPublisher = async (): Promise<void> => {
+    setActiveQuickAction("open-publisher");
+
+    try {
+      // 业务场景：桌面端由主进程校验平台白名单，防止渲染进程打开任意外链。
+      if (window.visualMuseDesktop) {
+        await window.visualMuseDesktop.openPublisher(selectedPlatformId);
+      } else {
+        window.open(publisherUrlMap[selectedPlatformId], "_blank", "noopener,noreferrer");
+      }
+
+      messageApi.success(`已打开${selectedPlatform.name}创作中心`);
+    } catch {
+      messageApi.error("无法打开创作中心，请稍后重试");
+    } finally {
+      setActiveQuickAction(null);
+    }
+  };
+
+  // 正文字数，保存去除首尾空白后的文章字符数量。
+  const articleCharacterCount = parsedArticle.body.trim().length;
+  // 自动保存提示文本，保存当前配置持久化状态的用户可读描述。
+  const saveStatusText = isSaving ? "正在保存" : "已自动保存";
 
   return (
     <ConfigProvider
@@ -399,6 +552,7 @@ export default function App() {
         token: antThemeTokens,
       }}
     >
+      {messageContextHolder}
       <main className="app-shell" data-theme={themeMode} data-testid="app-shell">
         <aside className="platform-rail" aria-label="发布平台">
           <div className="brand-lockup">
@@ -427,34 +581,44 @@ export default function App() {
           </div>
 
           <div className="rail-footer">
-            <Space align="center" size={10}>
-              {themeMode === "dark" ? <Moon aria-hidden="true" size={18} /> : <Sun aria-hidden="true" size={18} />}
-              <Switch aria-label="主题切换" checked={themeMode === "light"} onChange={handleThemeChange} />
-            </Space>
+            <Typography.Text type="secondary">界面主题</Typography.Text>
+            <Tooltip title={themeMode === "dark" ? "切换为浅色" : "切换为深色"}>
+              <Switch
+                aria-label="主题切换"
+                checked={themeMode === "light"}
+                checkedChildren={<Sun aria-hidden="true" size={13} />}
+                onChange={handleThemeChange}
+                unCheckedChildren={<Moon aria-hidden="true" size={13} />}
+              />
+            </Tooltip>
           </div>
         </aside>
 
         <section className="workspace" aria-label="文章编辑工作区">
           <header className="workspace-header">
             <div>
-              <Typography.Text className="section-kicker">Publishing Console</Typography.Text>
-              <Typography.Title level={2}>多平台可视化发布</Typography.Title>
+              <Typography.Text className="section-kicker">{selectedPlatform.name}</Typography.Text>
+              <Typography.Title level={2}>{parsedArticle.metadata.title || "未命名文章"}</Typography.Title>
               <Typography.Paragraph className="platform-capability">{selectedPlatform.capability}</Typography.Paragraph>
             </div>
-            <Space wrap>
-              <Tag className="neutral-tag">{selectedPlatform.name}</Tag>
-              <Tag className="neutral-tag">默认深色</Tag>
-            </Space>
+            <div className="save-indicator" aria-live="polite">
+              {isSaving ? <Cloud aria-hidden="true" size={15} /> : <Check aria-hidden="true" size={15} />}
+              <span>{saveStatusText}</span>
+            </div>
           </header>
 
-          <div className="editor-preview-grid">
+          {!isHydrated ? (
+            <section className="workspace-loading" aria-label="正在加载工作台">
+              <Skeleton active paragraph={{ rows: 10 }} title={{ width: "36%" }} />
+            </section>
+          ) : <div className="editor-preview-grid">
             <section className="editor-surface" aria-label="Markdown 编辑">
               <div className="panel-heading">
                 <Space size={10}>
                   <FileText aria-hidden="true" size={18} strokeWidth={1.8} />
                   <Typography.Text strong>Markdown</Typography.Text>
                 </Space>
-                <Badge status="default" text={parsedArticle.metadata.title || "缺少标题"} />
+                <Typography.Text type="secondary">{articleCharacterCount} 字</Typography.Text>
               </div>
               <Input.TextArea
                 aria-label="Markdown 编辑器"
@@ -466,7 +630,7 @@ export default function App() {
             </section>
 
             <PreviewPanel article={parsedArticle} platform={selectedPlatform} wechatPayload={wechatPayload} />
-          </div>
+          </div>}
         </section>
 
         <aside className="publish-panel" aria-label="发布配置">
@@ -478,7 +642,7 @@ export default function App() {
               </Space>
             </div>
 
-            <Form layout="vertical" size="middle">
+            {selectedPlatformId === "wechat" ? <Form layout="vertical" size="middle">
               <Form.Item label="AppID">
                 <Input
                   autoComplete="username"
@@ -531,7 +695,39 @@ export default function App() {
                   value={settingsState.defaultTheme}
                 />
               </Form.Item>
-            </Form>
+            </Form> : (
+              <Form layout="vertical" size="middle">
+                <Alert
+                  className="platform-note"
+                  description="无需提供账号密码、Cookie 或 Token，登录和最终发布均在平台创作中心完成。"
+                  showIcon
+                  title={`${selectedPlatform.name}内容准备`}
+                  type="info"
+                />
+                <Form.Item label="文章分类">
+                  <Input
+                    onChange={(event) => updateContentOption("category", event.target.value)}
+                    placeholder="例如：前端"
+                    value={contentOptions[selectedPlatformId].category}
+                  />
+                </Form.Item>
+                <Form.Item label="标签">
+                  <Input
+                    onChange={(event) => updateContentOption("tags", event.target.value)}
+                    placeholder="多个标签用逗号分隔"
+                    value={contentOptions[selectedPlatformId].tags}
+                  />
+                </Form.Item>
+                <Form.Item label="摘要">
+                  <Input.TextArea
+                    onChange={(event) => updateContentOption("summary", event.target.value)}
+                    placeholder="用于平台发布页的文章摘要"
+                    rows={3}
+                    value={contentOptions[selectedPlatformId].summary}
+                  />
+                </Form.Item>
+              </Form>
+            )}
           </div>
 
           <div className="panel-block">
@@ -545,9 +741,55 @@ export default function App() {
               <Button block icon={<FileText aria-hidden="true" size={16} />} onClick={handlePreflight}>
                 发布预检
               </Button>
-              <Button block icon={<Send aria-hidden="true" size={16} />} onClick={handleSimulatePublish} type="primary">
-                模拟发布
-              </Button>
+              {selectedPlatformId === "wechat" && (
+                <Button
+                  block
+                  disabled={isPublishing}
+                  icon={<Send aria-hidden="true" size={16} />}
+                  loading={isPublishing}
+                  onClick={() => void handleSimulatePublish()}
+                  type="primary"
+                >
+                  模拟发布
+                </Button>
+              )}
+              {selectedPlatformId !== "wechat" && (
+                <>
+                  <div className="copy-action-grid">
+                    <Button
+                      icon={<Copy aria-hidden="true" size={15} />}
+                      loading={activeQuickAction === "copy-title"}
+                      onClick={() => void handleCopyContent("title")}
+                    >
+                      复制标题
+                    </Button>
+                    <Button
+                      icon={<Copy aria-hidden="true" size={15} />}
+                      loading={activeQuickAction === "copy-body"}
+                      onClick={() => void handleCopyContent("body")}
+                    >
+                      复制正文
+                    </Button>
+                  </div>
+                  <Button
+                    block
+                    icon={<Copy aria-hidden="true" size={16} />}
+                    loading={activeQuickAction === "copy-all"}
+                    onClick={() => void handleCopyContent("all")}
+                  >
+                    复制标题和正文
+                  </Button>
+                  <Button
+                    block
+                    icon={<ExternalLink aria-hidden="true" size={16} />}
+                    loading={activeQuickAction === "open-publisher"}
+                    onClick={() => void handleOpenPublisher()}
+                    type="primary"
+                  >
+                    打开{selectedPlatform.name}创作中心
+                  </Button>
+                </>
+              )}
             </Space>
 
             {validation && (
@@ -575,7 +817,7 @@ export default function App() {
               </Space>
             </div>
             {publishResults.length === 0 ? (
-              <div className="empty-history">暂无发布记录</div>
+              <Empty className="empty-history" description="暂无发布记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
             ) : (
               <Timeline
                 items={publishResults.map((result) => ({

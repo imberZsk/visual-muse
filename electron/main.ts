@@ -1,10 +1,20 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, clipboard, ipcMain, shell } from "electron";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** 本地状态文件名，用于保存主题和发布配置。 */
 const stateFileName = "visual-muse-state.json";
+
+/** 平台创作入口白名单，用于限制渲染进程只能打开已审核的 HTTPS 地址。 */
+const publisherUrlMap: Record<string, string> = {
+  wechat: "https://mp.weixin.qq.com/",
+  zhihu: "https://www.zhihu.com/creator",
+  toutiao: "https://mp.toutiao.com/",
+  juejin: "https://juejin.cn/editor/drafts/new?v=2",
+  csdn: "https://editor.csdn.net/md/",
+  medium: "https://medium.com/new-story",
+};
 
 /**
  * 获取状态文件路径；无参数，返回 Electron userData 目录下的 JSON 文件路径。
@@ -57,6 +67,18 @@ async function writeStoredState(state: unknown): Promise<void> {
 function registerIpcHandlers(): void {
   ipcMain.handle("visual-muse:get-state", async () => readStoredState());
   ipcMain.handle("visual-muse:set-state", async (_event, state: unknown) => writeStoredState(state));
+  ipcMain.handle("visual-muse:copy-text", (_event, text: string) => clipboard.writeText(text));
+  ipcMain.handle("visual-muse:open-publisher", async (_event, platformId: string) => {
+    // 创作入口地址，保存平台白名单中与请求 ID 对应的固定 URL。
+    const publisherUrl = publisherUrlMap[platformId];
+
+    // 业务场景：未知平台 ID 不允许被拼成任意外链，避免渲染进程滥用系统浏览器。
+    if (!publisherUrl) {
+      throw new Error("不支持的发布平台");
+    }
+
+    await shell.openExternal(publisherUrl);
+  });
 }
 
 /**

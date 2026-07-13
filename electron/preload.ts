@@ -24,6 +24,17 @@ function exposePreloadApi(): void {
      */
     setState: async (state: VisualMuseStoreState): Promise<void> => ipcRenderer.invoke("visual-muse:set-state", state),
   });
+  contextBridge.exposeInMainWorld("visualMuseDesktop", {
+    /**
+     * 复制文本到系统剪贴板；`text` 是待复制的标题或正文。
+     */
+    copyText: async (text: string): Promise<void> => ipcRenderer.invoke("visual-muse:copy-text", text),
+    /**
+     * 打开平台创作入口；`platformId` 是预置白名单中的平台标识。
+     */
+    openPublisher: async (platformId: string): Promise<void> =>
+      ipcRenderer.invoke("visual-muse:open-publisher", platformId),
+  });
 }
 
 exposePreloadApi();
