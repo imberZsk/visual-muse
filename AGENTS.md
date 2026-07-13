@@ -35,4 +35,4 @@ src/               React 渲染进程、领域逻辑和测试
 - 代码注释规则见全局 AGENTS.md：函数/方法、变量必须添加用途说明；非显而易见分支说明业务场景；复杂逻辑/workaround 注释 WHY。
 - 容易阻塞的任务需要异步处理并提供 loading 状态。
 - 开发 UI 时优先考虑 Ant Design 是否已有合适组件。
-- 不要提交构建产物、覆盖率报告、`.superpowers/`、`docs/superpowers/`、`.npmrc` 或 npm/yarn 锁文件。
+- 不要提交构建产物、覆盖率报告、`.superpowers/`、`docs/superpowers/` 或 npm/yarn 锁文件。项目级 `.npmrc` 必须提交，且只允许公开、无凭据的 registry 配置；私有 registry、认证 token 和内网地址必须放用户级 `~/.npmrc`。

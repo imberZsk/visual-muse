@@ -1,6 +1,6 @@
 {
   "name": "visual-muse",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "面向内容整理和多平台发布准备的 Electron 桌面工作台",
@@ -37,9 +37,9 @@
     "start": "pnpm run build:ui && cross-env NODE_ENV=production electron .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "dist": "pnpm run build:ui && electron-builder --mac --arm64 --publish never",
-    "dist:win": "pnpm run build:ui && electron-builder --win --x64 --publish never",
-    "package": "pnpm run build:ui && electron-builder --dir"
+    "dist": "pnpm run build:ui && cross-env ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder --mac --arm64 --publish never",
+    "dist:win": "pnpm run build:ui && cross-env ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder --win --x64 --publish never",
+    "package": "pnpm run build:ui && cross-env ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder --dir"
   },
   "build": {
     "appId": "tech.visualmuse.publisher",
