@@ -1,13 +1,13 @@
 {
   "name": "visual-muse",
-  "version": "0.2.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "面向内容整理和多平台发布准备的 Electron 桌面工作台",
   "productName": "VisualMuse",
   "author": "imber",
   "license": "MIT",
-  "packageManager": "pnpm@11.7.0",
+  "packageManager": "pnpm@11.13.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/imberZsk/visual-muse.git"
@@ -25,7 +25,7 @@
     "desktop"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=22.12.0"
   },
   "main": "dist-electron/main.js",
   "scripts": {
@@ -71,6 +71,10 @@
         {
           "target": "dmg",
           "arch": "arm64"
+        },
+        {
+          "target": "zip",
+          "arch": "arm64"
         }
       ],
       "category": "public.app-category.productivity",
@@ -102,40 +106,41 @@
     }
   },
   "dependencies": {
-    "@ant-design/icons": "^6.0.0",
-    "@vitejs/plugin-react": "^5.0.0",
-    "antd": "^6.0.0",
-    "dayjs": "^1.11.13",
-    "lucide-react": "^0.468.0",
-    "marked": "^15.0.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "@ant-design/icons": "^6.3.2",
+    "@vitejs/plugin-react": "^6.0.3",
+    "antd": "^6.5.1",
+    "dayjs": "^1.11.21",
+    "electron-updater": "^6.8.9",
+    "lucide-react": "^1.24.0",
+    "marked": "^18.0.6",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
   },
   "devDependencies": {
-    "@commitlint/cli": "^20.5.3",
-    "@commitlint/config-conventional": "^20.5.3",
-    "@eslint/js": "^9.39.5",
-    "@testing-library/jest-dom": "^6.6.3",
-    "@testing-library/react": "^16.1.0",
-    "@types/node": "^24.13.2",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
-    "@vitest/coverage-v8": "3.2.7",
-    "concurrently": "^9.1.0",
-    "cross-env": "^10.0.0",
-    "electron": "42.5.2",
-    "electron-builder": "^26.0.0",
-    "eslint": "^9.39.5",
+    "@commitlint/cli": "^21.2.1",
+    "@commitlint/config-conventional": "^21.2.0",
+    "@eslint/js": "^10.0.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "^26.1.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitest/coverage-v8": "4.1.10",
+    "concurrently": "^10.0.3",
+    "cross-env": "^10.1.0",
+    "electron": "43.1.0",
+    "electron-builder": "^26.15.3",
+    "eslint": "^10.7.0",
     "eslint-plugin-react-hooks": "^7.1.1",
-    "globals": "^16.0.0",
+    "globals": "^17.7.0",
     "husky": "^9.1.7",
-    "jsdom": "^26.0.0",
-    "lint-staged": "^16.4.0",
+    "jsdom": "^29.1.1",
+    "lint-staged": "^17.0.8",
     "prettier": "^3.9.5",
-    "typescript": "^5.9.0",
-    "typescript-eslint": "^8.63.0",
-    "vite": "^7.0.0",
-    "vitest": "^3.0.0",
-    "wait-on": "^8.0.0"
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.64.0",
+    "vite": "^8.1.4",
+    "vitest": "^4.1.10",
+    "wait-on": "^9.0.10"
   }
 }
