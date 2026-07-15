@@ -1,6 +1,6 @@
 {
   "name": "visual-muse",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "面向内容整理和多平台发布准备的 Electron 桌面工作台",
@@ -71,6 +71,10 @@
         {
           "target": "dmg",
           "arch": "arm64"
+        },
+        {
+          "target": "zip",
+          "arch": "arm64"
         }
       ],
       "category": "public.app-category.productivity",
@@ -106,6 +110,7 @@
     "@vitejs/plugin-react": "^6.0.3",
     "antd": "^6.5.1",
     "dayjs": "^1.11.21",
+    "electron-updater": "^6.8.9",
     "lucide-react": "^1.24.0",
     "marked": "^18.0.6",
     "react": "^19.2.7",

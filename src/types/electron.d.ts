@@ -23,6 +23,16 @@ interface VisualMuseStoreState {
 interface Window {
   /** Electron preload 暴露的剪贴板与平台入口 API。 */
   visualMuseDesktop?: {
+    /** 检查应用更新。 */
+    checkAppUpdate?: () => Promise<{
+      available: boolean
+      version?: string
+      downloaded?: boolean
+    }>
+    /** 下载应用更新。 */
+    downloadAppUpdate?: () => Promise<{ downloaded: boolean }>
+    /** 安装已下载应用更新。 */
+    installAppUpdate?: () => Promise<boolean>
     /** 复制文本到系统剪贴板；`text` 是待复制内容。 */
     copyText: (text: string) => Promise<void>
     /** 打开平台创作入口；`platformId` 是平台标识。 */
