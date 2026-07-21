@@ -2,7 +2,7 @@ import { app, BrowserWindow, clipboard, ipcMain, shell } from 'electron'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { autoUpdater } from 'electron-updater'
+import { loadAutoUpdater } from './appUpdater.js'
 
 /** 本地状态文件名，用于保存主题和发布配置。 */
 const stateFileName = 'visual-muse-state.json'
@@ -11,6 +11,11 @@ const stateFileName = 'visual-muse-state.json'
 let updateDownloaded = false
 /** 正在执行的下载任务，用于合并重复点击。 */
 let updateDownloadPromise: Promise<{ downloaded: boolean }> | null = null
+/** 打包环境的更新器；模块导出异常时为空且不阻断应用启动。 */
+const autoUpdater = await loadAutoUpdater(
+  () => import('electron-updater'),
+  app.isPackaged
+)
 
 /** 平台创作入口白名单，用于限制渲染进程只能打开已审核的 HTTPS 地址。 */
 const publisherUrlMap: Record<string, string> = {
@@ -71,20 +76,28 @@ async function writeStoredState(state: unknown): Promise<void> {
  * 注册 IPC 存储接口；无参数，提供渲染进程安全读写本地状态的能力。
  */
 function registerIpcHandlers(): void {
-  autoUpdater.autoDownload = false
-  autoUpdater.autoInstallOnAppQuit = false
+  if (autoUpdater) {
+    autoUpdater.autoDownload = false
+    autoUpdater.autoInstallOnAppQuit = false
+  }
   ipcMain.handle('app-update:check', async () => {
     // 业务场景：开发环境没有发布配置，不访问 GitHub Release。
-    if (!app.isPackaged) return { available: false }
-    // 检查结果，保存 electron-updater 返回的新版本信息。
-    const result = await autoUpdater.checkForUpdates()
-    // 新版本号，保存远端 Release 的语义化版本。
-    const version = result?.updateInfo?.version
-    return version
-      ? { available: true, version, downloaded: updateDownloaded }
-      : { available: false }
+    if (!app.isPackaged || !autoUpdater) return { available: false }
+    try {
+      // 检查结果，保存 electron-updater 返回的新版本信息。
+      const result = await autoUpdater.checkForUpdates()
+      // 新版本号，保存远端 Release 的语义化版本。
+      const version = result?.updateInfo?.version
+      return result?.isUpdateAvailable && version
+        ? { available: true, version, downloaded: updateDownloaded }
+        : { available: false }
+    } catch {
+      // 公开 Release 只保留用户安装包时可能没有更新元数据，检查失败应降级而不是影响应用使用。
+      return { available: false }
+    }
   })
   ipcMain.handle('app-update:download', async () => {
+    if (!autoUpdater) throw new Error('应用更新模块不可用')
     // 业务场景：重复点击时复用同一 Promise，避免并发写入安装包。
     if (!updateDownloadPromise) {
       updateDownloadPromise = autoUpdater
@@ -100,6 +113,7 @@ function registerIpcHandlers(): void {
     return updateDownloadPromise
   })
   ipcMain.handle('app-update:install', () => {
+    if (!autoUpdater) throw new Error('应用更新模块不可用')
     if (!updateDownloaded) throw new Error('更新尚未下载完成')
     autoUpdater.quitAndInstall(false, true)
     return true

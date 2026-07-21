@@ -1,6 +1,6 @@
 {
   "name": "visual-muse",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "type": "module",
   "description": "面向内容整理和多平台发布准备的 Electron 桌面工作台",

@@ -59,9 +59,6 @@ jobs:
           path: |
             release/*.dmg
             release/*.exe
-            release/*.zip
-            release/*.yml
-            release/*.blockmap
           if-no-files-found: error
           retention-days: 3
 
@@ -83,7 +80,8 @@ jobs:
       - name: Flatten artifacts
         run: |
           mkdir -p dist-release
-          find artifacts -type f \( -name '*.dmg' -o -name '*.exe' -o -name '*.zip' -o -name '*.yml' -o -name '*.blockmap' \) -exec cp {} dist-release/ \;
+          find artifacts -type f \( -name '*.dmg' -o -name '*.exe' \) -exec cp {} dist-release/ \;
+          test "$(find dist-release -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 3
           ls -la dist-release
 
       - name: Generate install notes
@@ -94,7 +92,7 @@ jobs:
           if [ -n "$dmg" ]; then
             notes+=$'\n'"### macOS"$'\n'
             notes+="- \`${dmg}\`"$'\n'
-            notes+="- 安装包未签名，首次打开会被 Gatekeeper 拦截：请「右键 → 打开」，或执行 \`xattr -cr \"/Applications/${product_name}.app\"\`。"$'\n'
+            notes+="- 安装包未签名，首次打开会被 Gatekeeper 拦截：请「右键 → 打开」，或执行 \`sudo xattr -cr \"/Applications/${product_name}.app\"\`。"$'\n'
           fi
           setup=$(ls dist-release/*Setup*.exe 2>/dev/null | xargs -n1 basename 2>/dev/null | head -n1 || true)
           portable=$(ls dist-release/*portable*.exe 2>/dev/null | xargs -n1 basename 2>/dev/null | head -n1 || true)
@@ -115,9 +113,9 @@ jobs:
           release_assets=()
           while IFS= read -r file; do
             release_assets+=("$file")
-          done < <(find dist-release -type f \( -name '*.dmg' -o -name '*.exe' -o -name '*.zip' -o -name '*.yml' -o -name '*.blockmap' \) | sort)
-          if [ "${#release_assets[@]}" -eq 0 ]; then
-            echo "没有找到可发布的安装包"
+          done < <(find dist-release -type f \( -name '*.dmg' -o -name '*.exe' \) | sort)
+          if [ "${#release_assets[@]}" -ne 3 ]; then
+            echo "公开 Release 必须且只能包含 3 个用户安装包"
             exit 1
           fi
           gh release create "${GITHUB_REF_NAME}" "${release_assets[@]}" \
