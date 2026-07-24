@@ -67,6 +67,7 @@
       "package.json"
     ],
     "mac": {
+      "icon": "build/icon.icns",
       "artifactName": "VisualMuse-${version}-${arch}.${ext}",
       "target": [
         {
@@ -85,6 +86,7 @@
       "title": "Visual Muse ${version}"
     },
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         {
           "target": "nsis",
