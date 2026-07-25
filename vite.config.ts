@@ -57,6 +57,10 @@ export default defineConfig({
     },
   },
   plugins: [react()],
+  test: {
+    // exclude 存储由 Playwright 独立执行的 Electron E2E，避免 Vitest 重复收集。
+    exclude: ["e2e/**", "node_modules/**"],
+  },
   server: {
     host: "127.0.0.1",
     port: 5173,
