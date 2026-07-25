@@ -160,7 +160,8 @@ function createWindow(): void {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      preload: path.join(currentDirPath, 'preload.js'),
+      // Bug 修复：项目为 ESM，编译后的 preload.js 无法在当前隔离上下文稳定执行；CommonJS preload 确保 IPC 桥真实暴露。
+      preload: path.join(currentDirPath, '../electron/preload.cjs'),
     },
   })
 

@@ -799,8 +799,9 @@ export default function App() {
 
             {selectedPlatformId === 'wechat' ? (
               <Form layout="vertical" size="middle">
-                <Form.Item label="AppID">
+                <Form.Item label="AppID" htmlFor="publisher-app-id">
                   <Input
+                    id="publisher-app-id"
                     autoComplete="username"
                     onChange={(event) =>
                       updateSetting('appId', event.target.value)
@@ -809,8 +810,9 @@ export default function App() {
                     value={settingsState.appId}
                   />
                 </Form.Item>
-                <Form.Item label="AppSecret">
+                <Form.Item label="AppSecret" htmlFor="publisher-app-secret">
                   <Input.Password
+                    id="publisher-app-secret"
                     autoComplete="current-password"
                     onChange={(event) =>
                       updateSetting('appSecret', event.target.value)
@@ -819,8 +821,9 @@ export default function App() {
                     value={settingsState.appSecret}
                   />
                 </Form.Item>
-                <Form.Item label="Server">
+                <Form.Item label="Server" htmlFor="publisher-server-url">
                   <Input
+                    id="publisher-server-url"
                     onChange={(event) =>
                       updateSetting('serverUrl', event.target.value)
                     }
@@ -829,8 +832,9 @@ export default function App() {
                     value={settingsState.serverUrl}
                   />
                 </Form.Item>
-                <Form.Item label="API Key">
+                <Form.Item label="API Key" htmlFor="publisher-api-key">
                   <Input
+                    id="publisher-api-key"
                     onChange={(event) =>
                       updateSetting('apiKey', event.target.value)
                     }
@@ -838,8 +842,9 @@ export default function App() {
                     value={settingsState.apiKey}
                   />
                 </Form.Item>
-                <Form.Item label="代理">
+                <Form.Item label="代理" htmlFor="publisher-proxy-url">
                   <Input
+                    id="publisher-proxy-url"
                     onChange={(event) =>
                       updateSetting('proxyUrl', event.target.value)
                     }
@@ -848,8 +853,9 @@ export default function App() {
                     value={settingsState.proxyUrl}
                   />
                 </Form.Item>
-                <Form.Item label="默认主题">
+                <Form.Item label="默认主题" htmlFor="publisher-default-theme">
                   <Select
+                    id="publisher-default-theme"
                     onChange={(value) => updateSetting('defaultTheme', value)}
                     options={[
                       { label: 'Default', value: 'default' },
