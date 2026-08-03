@@ -317,8 +317,24 @@ museTest('CSDN 切换后标题、说明和入口同步更新', async (page) => {
   ).toBeVisible()
 })
 
+museTest('CSDN 通过真实 IPC 填入 Markdown 编辑器并保存草稿', async (page) => {
+  await selectPlatform(page, 'CSDN')
+  await page.getByRole('button', { name: '同步草稿' }).click()
+  await expect(
+    page.getByText('已触发平台保存草稿，请在窗口确认平台成功提示')
+  ).toBeVisible()
+})
+
 museTest('B 站专栏通过真实 IPC 填入 iframe 编辑器并保存草稿', async (page) => {
   await selectPlatform(page, 'B 站')
+  await page.getByRole('button', { name: '同步草稿' }).click()
+  await expect(
+    page.getByText('已触发平台保存草稿，请在窗口确认平台成功提示')
+  ).toBeVisible()
+})
+
+museTest('百家号通过真实 IPC 跨 frame 填入图文并保存草稿', async (page) => {
+  await selectPlatform(page, '百家号')
   await page.getByRole('button', { name: '同步草稿' }).click()
   await expect(
     page.getByText('已触发平台保存草稿，请在窗口确认平台成功提示')

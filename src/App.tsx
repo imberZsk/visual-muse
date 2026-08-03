@@ -198,7 +198,8 @@ const publisherUrlMap: Record<PlatformId, string> = {
   weibo: 'https://weibo.com/',
   bilibili: 'https://member.bilibili.com/platform/upload/text/edit',
   yuque: 'https://www.yuque.com/dashboard',
-  baijiahao: 'https://baijiahao.baidu.com/',
+  baijiahao:
+    'https://baijiahao.baidu.com/builder/rc/edit?type=news&is_from_cms=1',
 }
 
 /** 已接入持久平台会话填充的首批真实发布平台。 */

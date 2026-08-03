@@ -71,7 +71,8 @@ const publisherUrlMap: Record<string, string> = {
   weibo: 'https://weibo.com/',
   bilibili: 'https://member.bilibili.com/platform/upload/text/edit',
   yuque: 'https://www.yuque.com/dashboard',
-  baijiahao: 'https://baijiahao.baidu.com/',
+  baijiahao:
+    'https://baijiahao.baidu.com/builder/rc/edit?type=news&is_from_cms=1',
 }
 
 /** 平台登录检测域名，用于检查对应持久会话是否至少建立过站点登录数据。 */
@@ -123,6 +124,9 @@ const publisherE2EHtmlMap: Record<RealPublishPlatformId, string> = {
 const draftSyncE2EHtmlMap: Record<string, string> = {
   bilibili:
     '<!doctype html><iframe srcdoc="<!doctype html><input placeholder=&quot;请输入标题（建议30字以内）&quot;><div contenteditable=&quot;true&quot; role=&quot;textbox&quot;></div><button>保存为草稿</button>"></iframe>',
+  csdn: '<!doctype html><div class="article-bar__input-box"><div class="article-bar__title-display">【无标题】</div><input class="article-bar__title" placeholder="请输入文章标题（5~100个字）" style="display:none"></div><pre class="editor__inner" contenteditable="true"></pre><button>保存草稿</button><script>document.querySelector(".article-bar__title-display").addEventListener("click",()=>{document.querySelector(".article-bar__title").style.display="block"})</script>',
+  baijiahao:
+    '<!doctype html><div data-testid="news-title-input"><div contenteditable="true">请输入标题</div></div><iframe srcdoc="<!doctype html><body contenteditable=&quot;true&quot; style=&quot;height:100px&quot;>请输入正文</body>"></iframe><button>存草稿</button>',
 }
 
 /** 构建 E2E 本地编辑器地址；`html` 是不会访问外网的静态页面内容。 */
@@ -724,25 +728,29 @@ async function prepareDraftInPlatformWindow(
       }
   }
   // 安全请求 JSON，保存注入页面的标题和 Markdown 字符串。
-  const requestJson = JSON.stringify({ title, markdown })
+  const requestJson = JSON.stringify({ platformId, title, markdown })
   // 草稿填充脚本，保存将在主页面及各 iframe 内独立执行的受控编辑逻辑。
   const draftFillScript = `(async () => {
     const request = ${requestJson};
-    const isVisible = (element) => element instanceof HTMLElement && (element.offsetParent !== null || !element.ownerDocument.defaultView?.frameElement);
+    const isVisible = (element) => element instanceof HTMLElement && element.getClientRects().length > 0;
     const roots = [document, ...Array.from(document.querySelectorAll('iframe')).map((frame) => {
       try { return frame.contentDocument; } catch { return null; }
     }).filter(Boolean)];
     const queryAll = (selector) => roots.flatMap((root) => Array.from(root.querySelectorAll(selector)));
     const findVisible = (selectors) => selectors.map((selector) => queryAll(selector).find(isVisible)).find(Boolean);
-    const titleSelectors = ['textarea[placeholder*=标题]','input[placeholder*=标题]','textarea[maxlength="64"]','[contenteditable=true][data-placeholder*=标题]','[contenteditable=true][aria-label*=标题]','.js_title','.appmsg-title','#title','input.title-input','input.article-bar__title','.ProseMirror'];
+    const titleSelectors = ['textarea[placeholder*=标题]','input[placeholder*=标题]','textarea[maxlength="64"]','[contenteditable=true][data-placeholder*=标题]','[contenteditable=true][aria-label*=标题]','[data-testid="news-title-input"] [contenteditable=true]','.js_title','.appmsg-title','#title','input.title-input','input.article-bar__title','.ProseMirror'];
     const contentSelectors = ['.ProseMirror','.public-DraftEditor-content','textarea[placeholder*=正文]','textarea[placeholder*=内容]','.bytemd-editor textarea','[contenteditable=true]'];
+    if (request.platformId === 'csdn') {
+      const titleDisplay = document.querySelector('.article-bar__title-display');
+      if (titleDisplay instanceof HTMLElement) titleDisplay.click();
+    }
     const deadline = Date.now() + 10000;
     let titleElement;
     let contentElement;
     while (Date.now() < deadline) {
       titleElement = findVisible(titleSelectors);
       contentElement = contentSelectors.flatMap(queryAll).find((element) => element !== titleElement && isVisible(element));
-      if (titleElement && contentElement) break;
+      if (request.platformId === 'baijiahao' ? titleElement || contentElement : titleElement && contentElement) break;
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
     const setValue = (element, value) => {
@@ -769,15 +777,16 @@ async function prepareDraftInPlatformWindow(
     await new Promise((resolve) => setTimeout(resolve, 300));
     const buttons = queryAll('button,[role=button]').filter(isVisible);
     const draftButton = buttons.find((button) => ['保存草稿','保存为草稿','存草稿','保存至草稿箱'].some((label) => button.textContent?.replaceAll(' ', '').includes(label)));
-    if (titleFilled && contentFilled && draftButton instanceof HTMLElement) draftButton.click();
-    return { titleFilled, contentFilled, draftClicked: Boolean(titleFilled && contentFilled && draftButton) };
+    const canSaveDraft = titleFilled && (contentFilled || request.platformId === 'baijiahao');
+    if (canSaveDraft && draftButton instanceof HTMLElement) draftButton.click();
+    return { titleFilled, contentFilled, draftClicked: Boolean(canSaveDraft && draftButton) };
   })()`
   // 页面 frame 列表，保存主页面和 B 站等平台的跨域编辑器 iframe。
   const publisherFrames = [
     publisherWindow.webContents.mainFrame,
     ...publisherWindow.webContents.mainFrame.framesInSubtree,
   ]
-  // 填充结果，保存首个完整触发草稿保存的 frame 或最后一个局部识别结果。
+  // 填充结果，聚合主页面标题与 iframe 正文，支持百家号等分离式编辑器。
   let result: {
     titleFilled?: boolean
     contentFilled?: boolean
@@ -790,11 +799,31 @@ async function prepareDraftInPlatformWindow(
       .executeJavaScript(draftFillScript)
       .catch(() => null)) as typeof result | null
     if (!frameResult) continue
-    if (frameResult.titleFilled || frameResult.contentFilled)
-      result = frameResult
+    result = {
+      titleFilled: result.titleFilled || frameResult.titleFilled,
+      contentFilled: result.contentFilled || frameResult.contentFilled,
+      draftClicked: result.draftClicked || frameResult.draftClicked,
+    }
     if (frameResult.draftClicked) break
   }
-  if (!result.titleFilled && !result.contentFilled)
+  if (result.titleFilled && result.contentFilled && !result.draftClicked) {
+    // 草稿按钮脚本，保存跨 frame 填充完成后在主页面触发平台草稿保存。
+    const clickDraftButtonScript = `(() => {
+      const buttons = Array.from(document.querySelectorAll('button,[role=button]'));
+      const draftButton = buttons.find((button) => ['保存草稿','保存为草稿','存草稿','保存至草稿箱'].some((label) => button.textContent?.replaceAll(' ', '').includes(label)));
+      if (!(draftButton instanceof HTMLElement)) return false;
+      draftButton.click();
+      return true;
+    })()`
+    // 跨 frame 保存结果，记录是否至少有一个页面上下文识别到草稿按钮。
+    const draftClickResults = await Promise.all(
+      publisherFrames.map((frame) =>
+        frame.executeJavaScript(clickDraftButtonScript).catch(() => false)
+      )
+    )
+    result.draftClicked = draftClickResults.some(Boolean)
+  }
+  if (!result.titleFilled || !result.contentFilled)
     return {
       success: false,
       message: '没有识别到平台编辑器，页面结构可能已更新；窗口已保留供人工检查',
