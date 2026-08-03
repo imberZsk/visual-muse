@@ -442,6 +442,50 @@ museTest('图文编辑手动拆分四张卡片并切换主题', async (page) => 
   await expect(themeSelect.getByText('终端记录', { exact: true })).toBeVisible()
 })
 
+museTest('图文编辑提供稳定手机预览并支持封面流切换', async (page) => {
+  await page.getByRole('button', { name: '图文编辑', exact: true }).click()
+  // 手机预览，保存图文卡片在固定机型视口内的完整预览壳。
+  const phonePreview = page.getByLabel('手机预览')
+  await expect(phonePreview).toBeVisible()
+  await expect(phonePreview.getByText('9:41', { exact: true })).toBeVisible()
+  await expect(
+    phonePreview.getByText('笔记预览', { exact: true })
+  ).toBeVisible()
+
+  // 预览尺寸，验证机身不会超出右侧预览面板或被内容撑宽。
+  const previewMetrics = await phonePreview.evaluate((element) => {
+    // 机身边界，保存手机壳的最终几何尺寸。
+    const phoneBounds = element.getBoundingClientRect()
+    // 预览面板边界，保存手机壳可用的父级区域。
+    const panelBounds = element.parentElement?.getBoundingClientRect()
+    return {
+      width: phoneBounds.width,
+      left: phoneBounds.left,
+      right: phoneBounds.right,
+      panelLeft: panelBounds?.left ?? -1,
+      panelRight: panelBounds?.right ?? -1,
+      scrollWidth: element.scrollWidth,
+      clientWidth: element.clientWidth,
+      viewportHeight: window.innerHeight,
+      bottom: phoneBounds.bottom,
+    }
+  })
+  expect(previewMetrics.width).toBeLessThanOrEqual(430)
+  expect(previewMetrics.left).toBeGreaterThanOrEqual(previewMetrics.panelLeft)
+  expect(previewMetrics.right).toBeLessThanOrEqual(previewMetrics.panelRight)
+  expect(previewMetrics.scrollWidth).toBe(previewMetrics.clientWidth)
+  expect(previewMetrics.bottom).toBeLessThanOrEqual(
+    previewMetrics.viewportHeight
+  )
+
+  await page.getByText('封面流', { exact: true }).click()
+  await expect(phonePreview.getByText('发现', { exact: true })).toBeVisible()
+  await expect(phonePreview.locator('.xhs-feed-grid')).toHaveCSS(
+    'grid-template-columns',
+    /.+ .+/
+  )
+})
+
 museTest('内容管理保存历史版本并可查看', async (page) => {
   await page.getByRole('button', { name: '打开内容管理' }).click()
   await expect(page.getByText('内容管理', { exact: true })).toBeVisible()

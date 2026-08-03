@@ -140,6 +140,25 @@ museTest('关键发布工作区生成 UI 验收截图', async (page, _app, testI
   await capturePage(page, testInfo, 'juejin-min-window-light')
 })
 
+museTest(
+  '图文手机预览生成桌面和窄窗口验收截图',
+  async (page, _app, testInfo) => {
+    await page.getByRole('button', { name: '图文编辑', exact: true }).click()
+    await expect(page.getByLabel('手机预览')).toBeVisible()
+    await capturePage(page, testInfo, 'image-text-phone-preview-dark')
+
+    await page.getByText('封面流', { exact: true }).click()
+    await page.setViewportSize({ width: 1120, height: 720 })
+    await expect(page.getByLabel('手机预览').getByText('发现')).toBeVisible()
+    await assertStableLayout(page)
+    await capturePage(
+      page,
+      testInfo,
+      'image-text-phone-preview-min-window-dark'
+    )
+  }
+)
+
 museTest('桌面右侧设置区可滚动且主操作始终可达', async (page) => {
   await page.setViewportSize({ width: 1280, height: 720 })
   await page.getByRole('button', { name: '微信公众号', exact: true }).click()
