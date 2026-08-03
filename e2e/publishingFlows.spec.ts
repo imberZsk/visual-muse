@@ -1,4 +1,6 @@
 import { expect, type Page } from '@playwright/test'
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
 import { museTest } from './helpers/electronApp'
 
 // selectPlatform 从左侧发布平台栏切换目标平台。
@@ -109,6 +111,59 @@ museTest('微信公众号配置通过真实 IPC 自动保存并在刷新后回�
     'e2e-app-id'
   )
 })
+
+museTest(
+  '敏感凭据使用系统安全存储加密落盘并可解密回显',
+  async (page, _app, userDataPath) => {
+    // 测试凭据，保存仅用于隔离 userData 的可识别明文。
+    const appSecret = 'e2e-wechat-secret'
+    // 模型密钥，保存工作区加密路径的可识别明文。
+    const modelApiKey = 'e2e-model-secret'
+    await page.getByLabel('AppSecret', { exact: true }).fill(appSecret)
+    await expect
+      .poll(async () => page.evaluate(() => window.visualMuseStore?.getState()))
+      .toMatchObject({ settings: { appSecret } })
+    await page.evaluate(async (apiKey) => {
+      // 工作区接口，保存调用真实主进程持久化所需的 preload API。
+      const workspaceApi = window.visualMuseWorkspace
+      if (!workspaceApi) throw new Error('工作区 API 不可用')
+      // 当前工作区，保存加入测试模型前的完整合法状态。
+      const currentState = await workspaceApi.getState()
+      if (!currentState) throw new Error('当前工作区为空')
+      await workspaceApi.setState({
+        ...currentState,
+        models: [
+          {
+            id: 'model-e2e',
+            name: 'E2E',
+            baseUrl: 'https://example.com/v1',
+            model: 'test',
+            apiKey,
+            mode: 'api',
+          },
+        ],
+      })
+    }, modelApiKey)
+    // 发布状态原文，保存真实磁盘 JSON 供明文泄漏检查。
+    const publisherFile = await readFile(
+      path.join(userDataPath, 'visual-muse-state.json'),
+      'utf-8'
+    )
+    // 工作区原文，保存真实磁盘 JSON 供模型密钥泄漏检查。
+    const workspaceFile = await readFile(
+      path.join(userDataPath, 'visual-muse-workspace.json'),
+      'utf-8'
+    )
+    expect(publisherFile).not.toContain(appSecret)
+    expect(workspaceFile).not.toContain(modelApiKey)
+    expect(publisherFile).toContain('visual-muse-secure:v1:')
+    expect(workspaceFile).toContain('visual-muse-secure:v1:')
+    await page.reload()
+    await expect(page.getByLabel('AppSecret', { exact: true })).toHaveValue(
+      appSecret
+    )
+  }
+)
 
 museTest('公众号排版主题可切换为 Orange Heart', async (page) => {
   await page.getByLabel('默认主题', { exact: true }).click()
@@ -238,4 +293,99 @@ museTest('桌面默认尺寸下三栏边界互不重叠', async (page) => {
   expect(workspaceBox!.x + workspaceBox!.width).toBeLessThanOrEqual(
     publishBox!.x
   )
+})
+
+museTest('功能导航可进入工作台并展示创作统计', async (page) => {
+  await page.getByRole('button', { name: '工作台', exact: true }).click()
+  await expect(
+    page.getByRole('heading', { name: '工作台', exact: true })
+  ).toBeVisible()
+  await expect(page.getByText('今日记录', { exact: true })).toBeVisible()
+  await expect(page.getByText('本地文稿', { exact: true })).toBeVisible()
+})
+
+museTest('文章编辑支持纯预览和返回纯编辑', async (page) => {
+  await page.getByText('纯预览', { exact: true }).click()
+  await expect(page.getByLabel('Markdown 编辑器')).toBeHidden()
+  await expect(page.getByLabel('发布预览')).toBeVisible()
+  await page.getByText('纯编辑', { exact: true }).click()
+  await expect(page.getByLabel('Markdown 编辑器')).toBeVisible()
+  await expect(page.getByLabel('发布预览')).toBeHidden()
+})
+
+museTest('图文编辑手动拆分四张卡片并切换主题', async (page) => {
+  await page.getByRole('button', { name: '图文编辑', exact: true }).click()
+  await page
+    .getByLabel('图文 Markdown 编辑器')
+    .fill('第一张\n---\n第二张\n---\n第三张\n---\n第四张')
+  await expect(page.getByText('4 张', { exact: true })).toBeVisible()
+  await expect(page.getByText('CARD 4', { exact: true })).toBeVisible()
+  await page.getByLabel('图文主题').click()
+  await page.getByText('终端记录', { exact: true }).click()
+  const themeSelect = page
+    .locator('.studio-toolbar .ant-select')
+    .filter({ has: page.getByLabel('图文主题') })
+  await expect(themeSelect.getByText('终端记录', { exact: true })).toBeVisible()
+})
+
+museTest('内容管理保存历史版本并可查看', async (page) => {
+  await page.getByRole('button', { name: '打开内容管理' }).click()
+  await expect(page.getByText('内容管理', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '保存版本', exact: true }).click()
+  await expect(page.getByText('已保存历史版本')).toBeVisible()
+  await page.getByRole('button', { name: '历史', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: '历史版本' })).toBeVisible()
+  await expect(
+    page
+      .getByRole('dialog', { name: '历史版本' })
+      .getByRole('button', { name: /恢\s*复/ })
+  ).toBeVisible()
+})
+
+museTest('设置页可以通过真实 IPC 复制 Codex MCP 配置', async (page, app) => {
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page
+    .getByRole('button', { name: '复制 Codex 配置', exact: true })
+    .click()
+  // 剪贴板内容，保存真实主进程生成并通过受限 IPC 写入的 TOML。
+  const clipboardText = await app.evaluate(({ clipboard }) =>
+    clipboard.readText()
+  )
+  expect(clipboardText).toContain('[mcp_servers.visual-muse]')
+  expect(clipboardText).toContain('VISUAL_MUSE_DATA_DIR')
+})
+
+museTest('工作区并发自动保存按调用顺序原子落盘', async (page) => {
+  await expect
+    .poll(() =>
+      page.evaluate(async () =>
+        Boolean(await window.visualMuseWorkspace?.getState())
+      )
+    )
+    .toBe(true)
+  // 最终标记，保存并发写入队列最后一次调用应落盘的值。
+  const finalMarker = await page.evaluate(async () => {
+    // 工作区 API，保存 preload 暴露的真实 IPC 接口。
+    const workspaceApi = window.visualMuseWorkspace
+    if (!workspaceApi) throw new Error('工作区 API 不可用')
+    // 当前工作区，保存并发写入需要复用的完整合法状态。
+    const currentState = await workspaceApi.getState()
+    if (!currentState) throw new Error('当前工作区为空')
+    await Promise.all(
+      Array.from({ length: 12 }, (_, index) =>
+        workspaceApi.setState({
+          ...currentState,
+          settings: { ...currentState.settings, concurrentWriteMarker: index },
+        })
+      )
+    )
+    // 磁盘状态，保存所有并发 IPC 完成后的最终 JSON。
+    const storedState = await workspaceApi.getState()
+    return (
+      storedState?.settings as typeof currentState.settings & {
+        concurrentWriteMarker?: number
+      }
+    ).concurrentWriteMarker
+  })
+  expect(finalMarker).toBe(11)
 })

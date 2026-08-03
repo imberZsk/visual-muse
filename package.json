@@ -46,6 +46,7 @@
     "package": "pnpm run build:ui && cross-env ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder --dir",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "mcp": "pnpm exec tsc -p tsconfig.node.json && node dist-electron/mcpServer.js",
     "format": "prettier . --write",
     "format:check": "prettier . --check",
     "prepare": "husky"
@@ -114,6 +115,7 @@
   },
   "dependencies": {
     "@ant-design/icons": "^6.3.2",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@vitejs/plugin-react": "^6.0.3",
     "antd": "^6.5.1",
     "dayjs": "^1.11.21",
@@ -121,13 +123,14 @@
     "lucide-react": "^1.24.0",
     "marked": "^18.0.6",
     "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react-dom": "^19.2.7",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@playwright/test": "^1.61.1",
     "@commitlint/cli": "^21.2.1",
     "@commitlint/config-conventional": "^21.2.0",
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.61.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^26.1.1",
