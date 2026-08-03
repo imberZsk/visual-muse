@@ -119,6 +119,12 @@ const publisherE2EHtmlMap: Record<RealPublishPlatformId, string> = {
     '<!doctype html><textarea placeholder="请在这里输入标题"></textarea><div contenteditable="true" role="textbox"></div>',
 }
 
+/** 通用草稿同步 E2E 页面，覆盖 B 站 iframe 专栏编辑器结构。 */
+const draftSyncE2EHtmlMap: Record<string, string> = {
+  bilibili:
+    '<!doctype html><iframe srcdoc="<!doctype html><input placeholder=&quot;请输入标题（建议30字以内）&quot;><div contenteditable=&quot;true&quot; role=&quot;textbox&quot;></div><button>保存为草稿</button>"></iframe>',
+}
+
 /** 构建 E2E 本地编辑器地址；`html` 是不会访问外网的静态页面内容。 */
 function buildPublisherE2EUrl(html: string): string {
   return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`
@@ -646,6 +652,7 @@ async function prepareDraftInPlatformWindow(
   const publisherWindow = new BrowserWindow({
     width: 1280,
     height: 880,
+    show: !isE2E,
     title: `${platformId} 草稿同步`,
     webPreferences: {
       partition: getAccountPartition(platformId, accountId),
@@ -669,7 +676,12 @@ async function prepareDraftInPlatformWindow(
     }
     return { action: 'deny' }
   })
-  await publisherWindow.loadURL(publisherUrl)
+  // 实际加载地址，E2E 使用本地静态编辑器，避免访问真实平台并保持窗口不可见。
+  const loadedPublisherUrl =
+    isE2E && draftSyncE2EHtmlMap[platformId]
+      ? buildPublisherE2EUrl(draftSyncE2EHtmlMap[platformId])
+      : publisherUrl
+  await publisherWindow.loadURL(loadedPublisherUrl)
   // 页面地址，保存登录重定向判断和公众号编辑页跳转所需的最终 URL。
   let loadedUrl = publisherWindow.webContents.getURL()
   if (/login|passport|signin|auth/i.test(loadedUrl))
@@ -713,12 +725,15 @@ async function prepareDraftInPlatformWindow(
   }
   // 安全请求 JSON，保存注入页面的标题和 Markdown 字符串。
   const requestJson = JSON.stringify({ title, markdown })
-  // 填充结果，保存页面编辑器探测、输入与草稿按钮点击状态。
-  const result = (await publisherWindow.webContents
-    .executeJavaScript(`(async () => {
+  // 草稿填充脚本，保存将在主页面及各 iframe 内独立执行的受控编辑逻辑。
+  const draftFillScript = `(async () => {
     const request = ${requestJson};
-    const isVisible = (element) => element instanceof HTMLElement && element.offsetParent !== null;
-    const findVisible = (selectors) => selectors.map((selector) => Array.from(document.querySelectorAll(selector)).find(isVisible)).find(Boolean);
+    const isVisible = (element) => element instanceof HTMLElement && (element.offsetParent !== null || !element.ownerDocument.defaultView?.frameElement);
+    const roots = [document, ...Array.from(document.querySelectorAll('iframe')).map((frame) => {
+      try { return frame.contentDocument; } catch { return null; }
+    }).filter(Boolean)];
+    const queryAll = (selector) => roots.flatMap((root) => Array.from(root.querySelectorAll(selector)));
+    const findVisible = (selectors) => selectors.map((selector) => queryAll(selector).find(isVisible)).find(Boolean);
     const titleSelectors = ['textarea[placeholder*=标题]','input[placeholder*=标题]','textarea[maxlength="64"]','[contenteditable=true][data-placeholder*=标题]','[contenteditable=true][aria-label*=标题]','.js_title','.appmsg-title','#title','input.title-input','input.article-bar__title','.ProseMirror'];
     const contentSelectors = ['.ProseMirror','.public-DraftEditor-content','textarea[placeholder*=正文]','textarea[placeholder*=内容]','.bytemd-editor textarea','[contenteditable=true]'];
     const deadline = Date.now() + 10000;
@@ -726,7 +741,7 @@ async function prepareDraftInPlatformWindow(
     let contentElement;
     while (Date.now() < deadline) {
       titleElement = findVisible(titleSelectors);
-      contentElement = contentSelectors.flatMap((selector) => Array.from(document.querySelectorAll(selector))).find((element) => element !== titleElement && isVisible(element));
+      contentElement = contentSelectors.flatMap(queryAll).find((element) => element !== titleElement && isVisible(element));
       if (titleElement && contentElement) break;
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
@@ -737,7 +752,13 @@ async function prepareDraftInPlatformWindow(
         const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
         setter?.call(element, value);
       } else {
-        element.textContent = value;
+        element.focus();
+        const range = element.ownerDocument.createRange();
+        range.selectNodeContents(element);
+        const selection = element.ownerDocument.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+        element.ownerDocument.execCommand('insertText', false, value);
       }
       element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
       element.dispatchEvent(new Event('change', { bubbles: true }));
@@ -746,14 +767,32 @@ async function prepareDraftInPlatformWindow(
     const titleFilled = setValue(titleElement, request.title);
     const contentFilled = setValue(contentElement, request.markdown);
     await new Promise((resolve) => setTimeout(resolve, 300));
-    const buttons = Array.from(document.querySelectorAll('button,[role=button]')).filter(isVisible);
+    const buttons = queryAll('button,[role=button]').filter(isVisible);
     const draftButton = buttons.find((button) => ['保存草稿','保存为草稿','存草稿','保存至草稿箱'].some((label) => button.textContent?.replaceAll(' ', '').includes(label)));
     if (titleFilled && contentFilled && draftButton instanceof HTMLElement) draftButton.click();
     return { titleFilled, contentFilled, draftClicked: Boolean(titleFilled && contentFilled && draftButton) };
-  })()`)) as {
+  })()`
+  // 页面 frame 列表，保存主页面和 B 站等平台的跨域编辑器 iframe。
+  const publisherFrames = [
+    publisherWindow.webContents.mainFrame,
+    ...publisherWindow.webContents.mainFrame.framesInSubtree,
+  ]
+  // 填充结果，保存首个完整触发草稿保存的 frame 或最后一个局部识别结果。
+  let result: {
     titleFilled?: boolean
     contentFilled?: boolean
     draftClicked?: boolean
+  } = {}
+  // 业务场景：优先检查子 frame，B 站编辑器在 iframe 中可立即完成，避免等待主页面无效轮询。
+  for (const frame of [...publisherFrames].reverse()) {
+    // 单 frame 结果，保存当前上下文是否识别并操作了编辑器。
+    const frameResult = (await frame
+      .executeJavaScript(draftFillScript)
+      .catch(() => null)) as typeof result | null
+    if (!frameResult) continue
+    if (frameResult.titleFilled || frameResult.contentFilled)
+      result = frameResult
+    if (frameResult.draftClicked) break
   }
   if (!result.titleFilled && !result.contentFilled)
     return {
