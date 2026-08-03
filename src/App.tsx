@@ -41,8 +41,21 @@ import {
   Cloud,
   Copy,
   ExternalLink,
+  ChartNoAxesCombined,
+  Flame,
+  HelpCircle,
+  Images,
+  ImagePlus,
+  LayoutDashboard,
+  Library,
+  Palette,
+  PanelTop,
+  Sigma,
+  Sparkles,
   Sun,
+  Users,
   WandSparkles,
+  Workflow,
 } from 'lucide-react'
 import { type ChangeEvent, useEffect, useMemo, useState } from 'react'
 import {
@@ -62,10 +75,16 @@ import {
   type PublishValidation,
   type WechatDraftPayload,
 } from './domain/publisher'
+import type { StudioAccount, StudioPage as StudioPageId } from './domain/studio'
+import DocumentManager from './features/DocumentManager'
+import StudioPage from './features/StudioPage'
 import './styles.css'
 
 type ThemeMode = 'dark' | 'light'
 type RealPublishPlatformId = DistributionPlatformId
+
+/** 文章编辑区视图模式。 */
+type EditorViewMode = 'split' | 'edit' | 'preview'
 
 /** 右侧发布工作区视图，用于区分批量分发与当前平台设置。 */
 type PublishPanelView = 'distribution' | 'platform'
@@ -143,6 +162,30 @@ const autoSaveDelayMs = 500
 const appFontFamily =
   '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif'
 
+/** 功能导航项；在目标 UI 风格中提供内容工作台入口。 */
+const studioNavigationItems: Array<{
+  /** 功能页面标识。 */
+  id: StudioPageId
+  /** 功能页面名称。 */
+  name: string
+  /** 功能页面图标。 */
+  icon: typeof LayoutDashboard
+}> = [
+  { id: 'dashboard', name: '工作台', icon: LayoutDashboard },
+  { id: 'article', name: '文章编辑', icon: FileText },
+  { id: 'image-text', name: '图文编辑', icon: Images },
+  { id: 'themes', name: '主题模板', icon: Palette },
+  { id: 'skills', name: 'Skill 模板', icon: Sparkles },
+  { id: 'assistant', name: 'AI 助手', icon: WandSparkles },
+  { id: 'automation', name: '自动任务', icon: Workflow },
+  { id: 'trends', name: '灵感热榜', icon: Flame },
+  { id: 'accounts', name: '账号模型', icon: Users },
+  { id: 'assets', name: '素材库', icon: Library },
+  { id: 'analytics', name: '发布数据', icon: ChartNoAxesCombined },
+  { id: 'settings', name: '设置', icon: Settings },
+  { id: 'guide', name: '使用指南', icon: HelpCircle },
+]
+
 /** 平台创作入口地址，用于 Web 预览环境降级打开官方发布页面。 */
 const publisherUrlMap: Record<PlatformId, string> = {
   wechat: 'https://mp.weixin.qq.com/',
@@ -151,6 +194,11 @@ const publisherUrlMap: Record<PlatformId, string> = {
   toutiao: 'https://mp.toutiao.com/',
   juejin: 'https://juejin.cn/editor/drafts/new?v=2',
   csdn: 'https://editor.csdn.net/md/',
+  medium: 'https://medium.com/new-story',
+  weibo: 'https://weibo.com/',
+  bilibili: 'https://member.bilibili.com/platform/upload/text/edit',
+  yuque: 'https://www.yuque.com/dashboard',
+  baijiahao: 'https://baijiahao.baidu.com/',
 }
 
 /** 已接入持久平台会话填充的首批真实发布平台。 */
@@ -252,6 +300,11 @@ const platformIconMap = {
   toutiao: Newspaper,
   juejin: Code2,
   csdn: FileText,
+  medium: BookOpen,
+  weibo: MessageSquareText,
+  bilibili: Newspaper,
+  yuque: BookOpen,
+  baijiahao: FileText,
 } satisfies Record<PlatformId, typeof MessageSquareText>
 
 /** 判断平台是否支持持久会话填充；`platformId` 是当前平台标识。 */
@@ -422,6 +475,10 @@ function escapeHtml(value: string): string {
 export default function App() {
   // 全局消息 API，保存复制和打开平台后的非阻断反馈能力。
   const [messageApi, messageContextHolder] = message.useMessage()
+  // 当前功能页面，保存左侧工作台导航的选中项。
+  const [studioPage, setStudioPage] = useState<StudioPageId>('article')
+  // 文章视图模式，保存分栏、纯编辑或纯预览状态。
+  const [editorViewMode, setEditorViewMode] = useState<EditorViewMode>('split')
   // 当前主题模式，保存深色或浅色状态。
   const [themeMode, setThemeMode] = useState<ThemeMode>('dark')
   // 当前选中平台，保存平台导航的 active 项。
@@ -445,6 +502,20 @@ export default function App() {
   const [isPreparing, setIsPreparing] = useState(false)
   // 批量准备状态，保存三平台分发任务是否正在依次执行。
   const [isBatchPreparing, setIsBatchPreparing] = useState(false)
+  // 草稿同步状态，保存平台适配器是否正在执行。
+  const [isSyncingDraft, setIsSyncingDraft] = useState(false)
+  // 草稿同步反馈，保存适配器返回的可操作说明。
+  const [draftSyncStatus, setDraftSyncStatus] = useState<{
+    success: boolean
+    message: string
+  } | null>(null)
+  // 发布账号列表，保存当前平台可使用的持久账号槽位。
+  const [publisherAccounts, setPublisherAccounts] = useState<StudioAccount[]>(
+    []
+  )
+  // 当前账号标识，保存草稿同步要使用的独立会话。
+  const [selectedPublisherAccountId, setSelectedPublisherAccountId] =
+    useState<string>()
   // 分发目标选择，保存本次批量准备需要处理的平台集合。
   const [distributionTargets, setDistributionTargets] = useState<
     Record<RealPublishPlatformId, boolean>
@@ -523,6 +594,30 @@ export default function App() {
     controlHeight: 32,
     fontFamily: appFontFamily,
   }
+
+  useEffect(() => {
+    if (studioPage !== 'article') return
+    // 组件挂载标记，避免异步账号读取完成后更新已卸载页面。
+    let isMounted = true
+    void window.visualMuseWorkspace?.getState().then((state) => {
+      if (!isMounted) return
+      // 平台账号，保存与当前发布目标匹配的槽位。
+      const platformAccounts =
+        state?.accounts.filter(
+          (account) => account.platformId === selectedPlatformId
+        ) ?? []
+      setPublisherAccounts(platformAccounts)
+      setSelectedPublisherAccountId((currentId) =>
+        platformAccounts.some((account) => account.id === currentId)
+          ? currentId
+          : platformAccounts[0]?.id
+      )
+    })
+    /** 清理账号读取副作用。 */
+    return () => {
+      isMounted = false
+    }
+  }, [selectedPlatformId, studioPage])
 
   useEffect(() => {
     // 组件挂载标记，避免异步检查结束后更新已卸载组件。
@@ -654,6 +749,75 @@ export default function App() {
     setValidation(null)
     // 业务场景：源文章变化后旧平台结果已不能代表当前内容，恢复待准备状态避免误判。
     setDistributionTasks({ ...defaultDistributionTasks })
+  }
+
+  /** 从功能页载入文章；`content` 是要继续编辑的 Markdown。 */
+  const handleOpenArticle = (content: string): void => {
+    setMarkdown(content)
+    setValidation(null)
+    setStudioPage('article')
+  }
+
+  /** 在文章末尾插入结构化 Markdown；`snippet` 是要插入的模板。 */
+  const insertMarkdownSnippet = (snippet: string): void => {
+    setMarkdown(
+      (currentMarkdown) => `${currentMarkdown.trimEnd()}\n\n${snippet}\n`
+    )
+    setValidation(null)
+    setDistributionTasks({ ...defaultDistributionTasks })
+  }
+
+  /** 同步当前文章到平台草稿箱。 */
+  const handleSyncDraft = async (): Promise<void> => {
+    const nextValidation = validatePublishTarget(
+      selectedPlatform,
+      parsedArticle
+    )
+    setValidation(nextValidation)
+    setDraftSyncStatus(null)
+    if (!nextValidation.ok) return
+    if (!window.visualMuseWorkspace?.syncDraft) {
+      setDraftSyncStatus({
+        success: false,
+        message: '草稿同步仅在桌面应用中可用',
+      })
+      return
+    }
+    setIsSyncingDraft(true)
+    try {
+      // 发布账号，优先使用选中槽位，异步初始化期间回退到第一个账号。
+      const publisherAccount =
+        publisherAccounts.find(
+          (account) => account.id === selectedPublisherAccountId
+        ) ?? publisherAccounts[0]
+      const result = await window.visualMuseWorkspace.syncDraft({
+        platformId: selectedPlatformId,
+        title: articleTitle || '未命名文章',
+        markdown: parsedArticle.body,
+        mode:
+          selectedPlatformId === 'wechat' &&
+          settingsState.appId &&
+          settingsState.appSecret
+            ? 'api'
+            : 'ui',
+        appId: settingsState.appId,
+        appSecret: settingsState.appSecret,
+        cover: parsedArticle.metadata.cover,
+        author: parsedArticle.metadata.author,
+        sourceUrl: parsedArticle.metadata.source_url,
+        needOpenComment: parsedArticle.metadata.need_open_comment,
+        onlyFansCanComment: parsedArticle.metadata.only_fans_can_comment,
+        accountId: publisherAccount?.id,
+      })
+      setDraftSyncStatus({ success: result.success, message: result.message })
+    } catch (error) {
+      setDraftSyncStatus({
+        success: false,
+        message: error instanceof Error ? error.message : '草稿同步失败',
+      })
+    } finally {
+      setIsSyncingDraft(false)
+    }
   }
 
   /**
@@ -982,11 +1146,11 @@ export default function App() {
     >
       {messageContextHolder}
       <main
-        className="app-shell"
+        className={`app-shell${studioPage === 'article' ? '' : ' studio-mode'}`}
         data-theme={themeMode}
         data-testid="app-shell"
       >
-        <aside className="platform-rail" aria-label="发布平台">
+        <aside className="platform-rail" aria-label="主功能导航">
           <div className="brand-lockup">
             <div>
               <Typography.Title level={1}>Visual Muse</Typography.Title>
@@ -996,20 +1160,50 @@ export default function App() {
             </div>
           </div>
 
-          <div className="platform-list">
-            {publishingPlatforms.map((platform) => (
-              <Button
-                block
-                className="platform-button"
-                icon={<PlatformIcon platformId={platform.id} />}
-                key={platform.id}
-                onClick={() => handlePlatformSelect(platform.id)}
-                type={platform.id === selectedPlatformId ? 'primary' : 'text'}
-              >
-                {platform.name}
-              </Button>
-            ))}
+          <div
+            className="platform-list studio-navigation"
+            aria-label="功能模块"
+          >
+            {studioNavigationItems.map((item) => {
+              // 导航图标，保存当前功能项对应的 Lucide 组件。
+              const NavigationIcon = item.icon
+              return (
+                <Button
+                  block
+                  className="platform-button"
+                  icon={<NavigationIcon aria-hidden="true" size={16} />}
+                  key={item.id}
+                  onClick={() => setStudioPage(item.id)}
+                  type={item.id === studioPage ? 'primary' : 'text'}
+                >
+                  {item.name}
+                </Button>
+              )
+            })}
           </div>
+
+          {studioPage === 'article' && (
+            <div
+              className="platform-list publishing-platform-list"
+              aria-label="发布平台"
+            >
+              <Typography.Text className="rail-section-label" type="secondary">
+                发布平台
+              </Typography.Text>
+              {publishingPlatforms.map((platform) => (
+                <Button
+                  block
+                  className="platform-button"
+                  icon={<PlatformIcon platformId={platform.id} />}
+                  key={platform.id}
+                  onClick={() => handlePlatformSelect(platform.id)}
+                  type={platform.id === selectedPlatformId ? 'primary' : 'text'}
+                >
+                  {platform.name}
+                </Button>
+              ))}
+            </div>
+          )}
 
           <div className="rail-footer">
             <Typography.Text type="secondary">界面主题</Typography.Text>
@@ -1025,536 +1219,675 @@ export default function App() {
           </div>
         </aside>
 
-        <section className="workspace" aria-label="文章编辑工作区">
-          <header className="workspace-header">
-            <div>
-              <Typography.Text className="section-kicker">
-                {selectedPlatform.name}
-              </Typography.Text>
-              <Typography.Title level={2}>
-                {articleTitle || '未命名文章'}
-              </Typography.Title>
-              <Typography.Paragraph className="platform-capability">
-                {selectedPlatform.capability}
-              </Typography.Paragraph>
-            </div>
-            <Space>
-              {updateVersion && (
-                <Tooltip title={`新版本 v${updateVersion}`}>
-                  <Button
-                    size="small"
-                    type="primary"
-                    loading={isUpdateDownloading}
-                    onClick={() => void handleAppUpdate()}
-                  >
-                    {isUpdateDownloaded ? '安装并重启' : '下载更新'}
-                  </Button>
-                </Tooltip>
-              )}
-              <div className="save-indicator" aria-live="polite">
-                {isSaving ? (
-                  <Cloud aria-hidden="true" size={15} />
-                ) : (
-                  <Check aria-hidden="true" size={15} />
-                )}
-                <span>{saveStatusText}</span>
-              </div>
-            </Space>
-          </header>
-
-          {!isHydrated ? (
-            <section className="workspace-loading" aria-label="正在加载工作台">
-              <Skeleton active paragraph={{ rows: 10 }} />
-            </section>
-          ) : (
-            <div className="editor-preview-grid">
-              <section className="editor-surface" aria-label="Markdown 编辑">
-                <div className="panel-heading">
-                  <Space size={8}>
-                    <FileText aria-hidden="true" size={16} strokeWidth={1.8} />
-                    <Typography.Text strong>Markdown</Typography.Text>
-                  </Space>
-                  <Typography.Text type="secondary">
-                    {articleCharacterCount} 字
+        {studioPage === 'article' ? (
+          <>
+            <section className="workspace" aria-label="文章编辑工作区">
+              <header className="workspace-header">
+                <div>
+                  <Typography.Text className="section-kicker">
+                    {selectedPlatform.name}
                   </Typography.Text>
+                  <Typography.Title level={2}>
+                    {articleTitle || '未命名文章'}
+                  </Typography.Title>
+                  <Typography.Paragraph className="platform-capability">
+                    {selectedPlatform.capability}
+                  </Typography.Paragraph>
                 </div>
-                <Input.TextArea
-                  aria-label="Markdown 编辑器"
-                  className="markdown-editor"
-                  disabled={isBatchPreparing}
-                  onChange={handleMarkdownChange}
-                  spellCheck={false}
-                  value={markdown}
-                />
-              </section>
-
-              <PreviewPanel
-                article={parsedArticle}
-                platform={selectedPlatform}
-                wechatPayload={wechatPayload}
-              />
-            </div>
-          )}
-        </section>
-
-        <aside className="publish-panel" aria-label="发布配置">
-          <div className="publish-panel-toolbar">
-            <Segmented
-              aria-label="右侧工作区"
-              block
-              onChange={handlePublishPanelViewChange}
-              options={[
-                {
-                  icon: <Send aria-hidden="true" size={15} />,
-                  label: '批量分发',
-                  value: 'distribution',
-                },
-                {
-                  icon: <Settings aria-hidden="true" size={15} />,
-                  label: '平台设置',
-                  value: 'platform',
-                },
-              ]}
-              value={publishPanelView}
-            />
-          </div>
-
-          <div
-            className="publish-panel-scroll"
-            data-testid="publish-panel-scroll"
-          >
-            {publishPanelView === 'distribution' ? (
-              <div className="panel-block" aria-label="三平台分发计划">
-                <div className="panel-heading">
-                  <Space size={8}>
-                    <Send aria-hidden="true" size={16} strokeWidth={1.8} />
-                    <Typography.Text strong>三平台分发</Typography.Text>
-                  </Space>
-                  <Typography.Text type="secondary">
-                    {selectedDistributionCount}/3
-                  </Typography.Text>
-                </div>
-                <div className="distribution-list">
-                  {distributionPlan.map((variant) => {
-                    // 平台任务，保存当前行最近一次真实草稿准备结果。
-                    const task = distributionTasks[variant.platformId]
-                    // 预检说明，保存阻断问题、优化建议或通过状态。
-                    const preflightMessage =
-                      variant.validation.errors.join('；') ||
-                      variant.validation.warnings.join('；') ||
-                      '预检通过'
-                    // 行状态说明，真实任务执行后优先展示平台返回信息。
-                    const statusMessage = task.message || preflightMessage
-                    // 是否允许重试，保存异常或登录处理后的单平台再次执行入口。
-                    const canRetry = [
-                      'login-required',
-                      'not-ready',
-                      'failed',
-                    ].includes(task.status)
-                    // 是否为阻断状态，保存尚未执行但预检失败时的展示判断。
-                    const isPreflightBlocked =
-                      task.status === 'idle' && !variant.validation.ok
-
-                    return (
-                      <div
-                        className="distribution-row"
-                        data-platform={variant.platformId}
-                        key={variant.platformId}
+                <Space>
+                  <DocumentManager
+                    markdown={markdown}
+                    onLoadDocument={handleOpenArticle}
+                    title={articleTitle || '未命名文章'}
+                  />
+                  {updateVersion && (
+                    <Tooltip title={`新版本 v${updateVersion}`}>
+                      <Button
+                        size="small"
+                        type="primary"
+                        loading={isUpdateDownloading}
+                        onClick={() => void handleAppUpdate()}
                       >
-                        <div className="distribution-row-heading">
-                          <Checkbox
-                            aria-label={`选择${variant.platformName}`}
-                            checked={distributionTargets[variant.platformId]}
-                            disabled={isBatchPreparing}
-                            onChange={(event) =>
-                              handleDistributionTargetChange(
-                                variant.platformId,
-                                event.target.checked
-                              )
-                            }
-                          />
-                          <Button
-                            aria-label={`查看${variant.platformName}设置`}
-                            className="distribution-platform-button"
-                            icon={
-                              <PlatformIcon platformId={variant.platformId} />
-                            }
-                            onClick={() =>
-                              handlePlatformSelect(variant.platformId)
-                            }
-                            type="text"
+                        {isUpdateDownloaded ? '安装并重启' : '下载更新'}
+                      </Button>
+                    </Tooltip>
+                  )}
+                  <div className="save-indicator" aria-live="polite">
+                    {isSaving ? (
+                      <Cloud aria-hidden="true" size={15} />
+                    ) : (
+                      <Check aria-hidden="true" size={15} />
+                    )}
+                    <span>{saveStatusText}</span>
+                  </div>
+                </Space>
+              </header>
+
+              {!isHydrated ? (
+                <section
+                  className="workspace-loading"
+                  aria-label="正在加载工作台"
+                >
+                  <Skeleton active paragraph={{ rows: 10 }} />
+                </section>
+              ) : (
+                <>
+                  <div className="article-toolbar" aria-label="文章编辑工具栏">
+                    <Segmented
+                      aria-label="文章视图模式"
+                      options={[
+                        { label: '分栏', value: 'split' },
+                        { label: '纯编辑', value: 'edit' },
+                        { label: '纯预览', value: 'preview' },
+                      ]}
+                      value={editorViewMode}
+                      onChange={(value) =>
+                        setEditorViewMode(value as EditorViewMode)
+                      }
+                    />
+                    <Space wrap>
+                      <Button
+                        icon={<ImagePlus size={16} />}
+                        onClick={() =>
+                          insertMarkdownSnippet(
+                            '![图片说明](https://example.com/image.png)'
+                          )
+                        }
+                      >
+                        图片
+                      </Button>
+                      <Button
+                        icon={<Sigma size={16} />}
+                        onClick={() =>
+                          insertMarkdownSnippet('$$\nE = mc^2\n$$')
+                        }
+                      >
+                        公式
+                      </Button>
+                      <Button
+                        icon={<PanelTop size={16} />}
+                        onClick={() =>
+                          insertMarkdownSnippet(
+                            '> **信息卡片**\n> 在这里填写需要强调的内容。'
+                          )
+                        }
+                      >
+                        布局块
+                      </Button>
+                    </Space>
+                  </div>
+                  <div
+                    className={`editor-preview-grid editor-view-${editorViewMode}`}
+                  >
+                    {editorViewMode !== 'preview' && (
+                      <section
+                        className="editor-surface"
+                        aria-label="Markdown 编辑"
+                      >
+                        <div className="panel-heading">
+                          <Space size={8}>
+                            <FileText
+                              aria-hidden="true"
+                              size={16}
+                              strokeWidth={1.8}
+                            />
+                            <Typography.Text strong>Markdown</Typography.Text>
+                          </Space>
+                          <Typography.Text type="secondary">
+                            {articleCharacterCount} 字
+                          </Typography.Text>
+                        </div>
+                        <Input.TextArea
+                          aria-label="Markdown 编辑器"
+                          className="markdown-editor"
+                          disabled={isBatchPreparing}
+                          onChange={handleMarkdownChange}
+                          spellCheck={false}
+                          value={markdown}
+                        />
+                      </section>
+                    )}
+
+                    {editorViewMode !== 'edit' && (
+                      <PreviewPanel
+                        article={parsedArticle}
+                        platform={selectedPlatform}
+                        wechatPayload={wechatPayload}
+                      />
+                    )}
+                  </div>
+                </>
+              )}
+            </section>
+
+            <aside className="publish-panel" aria-label="发布配置">
+              <div className="publish-panel-toolbar">
+                <Segmented
+                  aria-label="右侧工作区"
+                  block
+                  onChange={handlePublishPanelViewChange}
+                  options={[
+                    {
+                      icon: <Send aria-hidden="true" size={15} />,
+                      label: '批量分发',
+                      value: 'distribution',
+                    },
+                    {
+                      icon: <Settings aria-hidden="true" size={15} />,
+                      label: '平台设置',
+                      value: 'platform',
+                    },
+                  ]}
+                  value={publishPanelView}
+                />
+              </div>
+
+              <div
+                className="publish-panel-scroll"
+                data-testid="publish-panel-scroll"
+              >
+                {publishPanelView === 'distribution' ? (
+                  <div className="panel-block" aria-label="三平台分发计划">
+                    <div className="panel-heading">
+                      <Space size={8}>
+                        <Send aria-hidden="true" size={16} strokeWidth={1.8} />
+                        <Typography.Text strong>三平台分发</Typography.Text>
+                      </Space>
+                      <Typography.Text type="secondary">
+                        {selectedDistributionCount}/3
+                      </Typography.Text>
+                    </div>
+                    <div className="distribution-list">
+                      {distributionPlan.map((variant) => {
+                        // 平台任务，保存当前行最近一次真实草稿准备结果。
+                        const task = distributionTasks[variant.platformId]
+                        // 预检说明，保存阻断问题、优化建议或通过状态。
+                        const preflightMessage =
+                          variant.validation.errors.join('；') ||
+                          variant.validation.warnings.join('；') ||
+                          '预检通过'
+                        // 行状态说明，真实任务执行后优先展示平台返回信息。
+                        const statusMessage = task.message || preflightMessage
+                        // 是否允许重试，保存异常或登录处理后的单平台再次执行入口。
+                        const canRetry = [
+                          'login-required',
+                          'not-ready',
+                          'failed',
+                        ].includes(task.status)
+                        // 是否为阻断状态，保存尚未执行但预检失败时的展示判断。
+                        const isPreflightBlocked =
+                          task.status === 'idle' && !variant.validation.ok
+
+                        return (
+                          <div
+                            className="distribution-row"
+                            data-platform={variant.platformId}
+                            key={variant.platformId}
                           >
-                            {variant.platformName}
-                          </Button>
-                          <Tooltip title={statusMessage}>
-                            <Tag
-                              className="distribution-status"
-                              color={
-                                isPreflightBlocked
-                                  ? 'error'
-                                  : distributionStatusColorMap[task.status]
-                              }
-                            >
-                              {isPreflightBlocked
-                                ? '需处理'
-                                : distributionStatusLabelMap[task.status]}
-                            </Tag>
-                          </Tooltip>
-                          {canRetry && (
-                            <Tooltip title={`重试${variant.platformName}`}>
-                              <Button
-                                aria-label={`重试${variant.platformName}`}
-                                disabled={isPreparing || isBatchPreparing}
-                                icon={
-                                  <RotateCcw aria-hidden="true" size={14} />
+                            <div className="distribution-row-heading">
+                              <Checkbox
+                                aria-label={`选择${variant.platformName}`}
+                                checked={
+                                  distributionTargets[variant.platformId]
                                 }
-                                onClick={() =>
-                                  void handleRetryDistribution(
-                                    variant.platformId
+                                disabled={isBatchPreparing}
+                                onChange={(event) =>
+                                  handleDistributionTargetChange(
+                                    variant.platformId,
+                                    event.target.checked
                                   )
                                 }
-                                size="small"
+                              />
+                              <Button
+                                aria-label={`查看${variant.platformName}设置`}
+                                className="distribution-platform-button"
+                                icon={
+                                  <PlatformIcon
+                                    platformId={variant.platformId}
+                                  />
+                                }
+                                onClick={() =>
+                                  handlePlatformSelect(variant.platformId)
+                                }
                                 type="text"
-                              />
-                            </Tooltip>
-                          )}
-                        </div>
-                        <div className="distribution-row-meta">
-                          <Tag className="neutral-tag">
-                            {variant.formatLabel}
-                          </Tag>
-                          <span>{variant.characterCount} 字</span>
-                          <span>摘要 {variant.summary.length} 字</span>
-                          <Tooltip title={statusMessage}>
-                            {task.status === 'preparing' ? (
-                              <LoaderCircle
-                                aria-label="准备中"
-                                className="distribution-spinner"
-                                size={14}
-                              />
-                            ) : task.status === 'prepared' ? (
-                              <CircleCheck
-                                aria-label="已填入"
-                                className="distribution-success-icon"
-                                size={14}
-                              />
-                            ) : variant.validation.warnings.length > 0 ||
-                              !variant.validation.ok ? (
-                              <CircleAlert
-                                aria-label="有预检提示"
-                                className="distribution-warning-icon"
-                                size={14}
-                              />
-                            ) : (
-                              <CircleCheck
-                                aria-label="预检通过"
-                                className="distribution-ready-icon"
-                                size={14}
-                              />
-                            )}
-                          </Tooltip>
-                        </div>
+                              >
+                                {variant.platformName}
+                              </Button>
+                              <Tooltip title={statusMessage}>
+                                <Tag
+                                  className="distribution-status"
+                                  color={
+                                    isPreflightBlocked
+                                      ? 'error'
+                                      : distributionStatusColorMap[task.status]
+                                  }
+                                >
+                                  {isPreflightBlocked
+                                    ? '需处理'
+                                    : distributionStatusLabelMap[task.status]}
+                                </Tag>
+                              </Tooltip>
+                              {canRetry && (
+                                <Tooltip title={`重试${variant.platformName}`}>
+                                  <Button
+                                    aria-label={`重试${variant.platformName}`}
+                                    disabled={isPreparing || isBatchPreparing}
+                                    icon={
+                                      <RotateCcw aria-hidden="true" size={14} />
+                                    }
+                                    onClick={() =>
+                                      void handleRetryDistribution(
+                                        variant.platformId
+                                      )
+                                    }
+                                    size="small"
+                                    type="text"
+                                  />
+                                </Tooltip>
+                              )}
+                            </div>
+                            <div className="distribution-row-meta">
+                              <Tag className="neutral-tag">
+                                {variant.formatLabel}
+                              </Tag>
+                              <span>{variant.characterCount} 字</span>
+                              <span>摘要 {variant.summary.length} 字</span>
+                              <Tooltip title={statusMessage}>
+                                {task.status === 'preparing' ? (
+                                  <LoaderCircle
+                                    aria-label="准备中"
+                                    className="distribution-spinner"
+                                    size={14}
+                                  />
+                                ) : task.status === 'prepared' ? (
+                                  <CircleCheck
+                                    aria-label="已填入"
+                                    className="distribution-success-icon"
+                                    size={14}
+                                  />
+                                ) : variant.validation.warnings.length > 0 ||
+                                  !variant.validation.ok ? (
+                                  <CircleAlert
+                                    aria-label="有预检提示"
+                                    className="distribution-warning-icon"
+                                    size={14}
+                                  />
+                                ) : (
+                                  <CircleCheck
+                                    aria-label="预检通过"
+                                    className="distribution-ready-icon"
+                                    size={14}
+                                  />
+                                )}
+                              </Tooltip>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="publish-panel-content">
+                    <div className="panel-block">
+                      <div className="panel-heading">
+                        <Space size={8}>
+                          <PlatformIcon platformId={selectedPlatformId} />
+                          <Typography.Text strong>
+                            {selectedPlatform.name}设置
+                          </Typography.Text>
+                        </Space>
                       </div>
-                    )
-                  })}
-                </div>
-              </div>
-            ) : (
-              <div className="publish-panel-content">
-                <div className="panel-block">
-                  <div className="panel-heading">
-                    <Space size={8}>
-                      <PlatformIcon platformId={selectedPlatformId} />
-                      <Typography.Text strong>
-                        {selectedPlatform.name}设置
-                      </Typography.Text>
-                    </Space>
-                  </div>
 
-                  {selectedPlatformId === 'wechat' ? (
-                    <Form layout="vertical" size="middle">
-                      <Form.Item
-                        label="默认主题"
-                        htmlFor="publisher-default-theme"
+                      {selectedPlatformId === 'wechat' ? (
+                        <Form layout="vertical" size="middle">
+                          <Form.Item
+                            label="默认主题"
+                            htmlFor="publisher-default-theme"
+                          >
+                            <Select
+                              id="publisher-default-theme"
+                              onChange={(value) =>
+                                updateSetting('defaultTheme', value)
+                              }
+                              options={[
+                                { label: 'Default', value: 'default' },
+                                {
+                                  label: 'Orange Heart',
+                                  value: 'orange-heart',
+                                },
+                                { label: 'Lapis', value: 'lapis' },
+                                { label: 'Rainbow', value: 'rainbow' },
+                                { label: 'Phycat Mint', value: 'phycat' },
+                              ]}
+                              value={settingsState.defaultTheme}
+                            />
+                          </Form.Item>
+                          <Collapse
+                            className="advanced-settings"
+                            expandIcon={renderCollapseIcon}
+                            expandIconPlacement="end"
+                            ghost
+                            items={[
+                              {
+                                children: (
+                                  <div className="advanced-settings-fields">
+                                    <Form.Item
+                                      label="AppID"
+                                      htmlFor="publisher-app-id"
+                                    >
+                                      <Input
+                                        id="publisher-app-id"
+                                        autoComplete="username"
+                                        onChange={(event) =>
+                                          updateSetting(
+                                            'appId',
+                                            event.target.value
+                                          )
+                                        }
+                                        prefix={
+                                          <KeyRound
+                                            aria-hidden="true"
+                                            size={16}
+                                          />
+                                        }
+                                        value={settingsState.appId}
+                                      />
+                                    </Form.Item>
+                                    <Form.Item
+                                      label="AppSecret"
+                                      htmlFor="publisher-app-secret"
+                                    >
+                                      <Input.Password
+                                        id="publisher-app-secret"
+                                        autoComplete="current-password"
+                                        onChange={(event) =>
+                                          updateSetting(
+                                            'appSecret',
+                                            event.target.value
+                                          )
+                                        }
+                                        prefix={
+                                          <KeyRound
+                                            aria-hidden="true"
+                                            size={16}
+                                          />
+                                        }
+                                        value={settingsState.appSecret}
+                                      />
+                                    </Form.Item>
+                                    <Form.Item
+                                      label="Server"
+                                      htmlFor="publisher-server-url"
+                                    >
+                                      <Input
+                                        id="publisher-server-url"
+                                        onChange={(event) =>
+                                          updateSetting(
+                                            'serverUrl',
+                                            event.target.value
+                                          )
+                                        }
+                                        prefix={
+                                          <Server
+                                            aria-hidden="true"
+                                            size={16}
+                                          />
+                                        }
+                                        type="url"
+                                        value={settingsState.serverUrl}
+                                      />
+                                    </Form.Item>
+                                    <Form.Item
+                                      label="API Key"
+                                      htmlFor="publisher-api-key"
+                                    >
+                                      <Input
+                                        id="publisher-api-key"
+                                        onChange={(event) =>
+                                          updateSetting(
+                                            'apiKey',
+                                            event.target.value
+                                          )
+                                        }
+                                        prefix={
+                                          <KeyRound
+                                            aria-hidden="true"
+                                            size={16}
+                                          />
+                                        }
+                                        value={settingsState.apiKey}
+                                      />
+                                    </Form.Item>
+                                    <Form.Item
+                                      label="代理"
+                                      htmlFor="publisher-proxy-url"
+                                    >
+                                      <Input
+                                        id="publisher-proxy-url"
+                                        onChange={(event) =>
+                                          updateSetting(
+                                            'proxyUrl',
+                                            event.target.value
+                                          )
+                                        }
+                                        placeholder="http://127.0.0.1:7890"
+                                        type="url"
+                                        value={settingsState.proxyUrl}
+                                      />
+                                    </Form.Item>
+                                  </div>
+                                ),
+                                key: 'wechat-api',
+                                label: '接口发布（可选）',
+                              },
+                            ]}
+                          />
+                        </Form>
+                      ) : (
+                        <Form layout="vertical" size="middle">
+                          <Form.Item label="文章分类">
+                            <Input
+                              onChange={(event) =>
+                                updateContentOption(
+                                  'category',
+                                  event.target.value
+                                )
+                              }
+                              placeholder="例如：前端"
+                              value={
+                                contentOptions[selectedPlatformId].category
+                              }
+                            />
+                          </Form.Item>
+                          <Form.Item label="标签">
+                            <Input
+                              onChange={(event) =>
+                                updateContentOption('tags', event.target.value)
+                              }
+                              placeholder="多个标签用逗号分隔"
+                              value={contentOptions[selectedPlatformId].tags}
+                            />
+                          </Form.Item>
+                          <Form.Item label="摘要">
+                            <Input.TextArea
+                              onChange={(event) =>
+                                updateContentOption(
+                                  'summary',
+                                  event.target.value
+                                )
+                              }
+                              placeholder="用于平台发布页的文章摘要"
+                              rows={3}
+                              value={contentOptions[selectedPlatformId].summary}
+                            />
+                          </Form.Item>
+                        </Form>
+                      )}
+                    </div>
+
+                    <div className="panel-block">
+                      <div className="panel-heading">
+                        <Space size={8}>
+                          <WandSparkles
+                            aria-hidden="true"
+                            size={16}
+                            strokeWidth={1.8}
+                          />
+                          <Typography.Text strong>发布工具</Typography.Text>
+                        </Space>
+                      </div>
+                      {publisherAccounts.length > 0 && (
+                        <Form.Item label="发布账号">
+                          <Select
+                            aria-label="发布账号"
+                            onChange={setSelectedPublisherAccountId}
+                            options={publisherAccounts.map((account) => ({
+                              label: account.name,
+                              value: account.id,
+                            }))}
+                            value={selectedPublisherAccountId}
+                          />
+                        </Form.Item>
+                      )}
+                      <Space
+                        className="action-row"
+                        orientation="vertical"
+                        size={12}
                       >
-                        <Select
-                          id="publisher-default-theme"
-                          onChange={(value) =>
-                            updateSetting('defaultTheme', value)
-                          }
-                          options={[
-                            { label: 'Default', value: 'default' },
-                            { label: 'Orange Heart', value: 'orange-heart' },
-                            { label: 'Lapis', value: 'lapis' },
-                            { label: 'Rainbow', value: 'rainbow' },
-                            { label: 'Phycat Mint', value: 'phycat' },
-                          ]}
-                          value={settingsState.defaultTheme}
-                        />
-                      </Form.Item>
-                      <Collapse
-                        className="advanced-settings"
-                        expandIcon={renderCollapseIcon}
-                        expandIconPlacement="end"
-                        ghost
-                        items={[
-                          {
-                            children: (
-                              <div className="advanced-settings-fields">
-                                <Form.Item
-                                  label="AppID"
-                                  htmlFor="publisher-app-id"
-                                >
-                                  <Input
-                                    id="publisher-app-id"
-                                    autoComplete="username"
-                                    onChange={(event) =>
-                                      updateSetting('appId', event.target.value)
-                                    }
-                                    prefix={
-                                      <KeyRound aria-hidden="true" size={16} />
-                                    }
-                                    value={settingsState.appId}
-                                  />
-                                </Form.Item>
-                                <Form.Item
-                                  label="AppSecret"
-                                  htmlFor="publisher-app-secret"
-                                >
-                                  <Input.Password
-                                    id="publisher-app-secret"
-                                    autoComplete="current-password"
-                                    onChange={(event) =>
-                                      updateSetting(
-                                        'appSecret',
-                                        event.target.value
-                                      )
-                                    }
-                                    prefix={
-                                      <KeyRound aria-hidden="true" size={16} />
-                                    }
-                                    value={settingsState.appSecret}
-                                  />
-                                </Form.Item>
-                                <Form.Item
-                                  label="Server"
-                                  htmlFor="publisher-server-url"
-                                >
-                                  <Input
-                                    id="publisher-server-url"
-                                    onChange={(event) =>
-                                      updateSetting(
-                                        'serverUrl',
-                                        event.target.value
-                                      )
-                                    }
-                                    prefix={
-                                      <Server aria-hidden="true" size={16} />
-                                    }
-                                    type="url"
-                                    value={settingsState.serverUrl}
-                                  />
-                                </Form.Item>
-                                <Form.Item
-                                  label="API Key"
-                                  htmlFor="publisher-api-key"
-                                >
-                                  <Input
-                                    id="publisher-api-key"
-                                    onChange={(event) =>
-                                      updateSetting(
-                                        'apiKey',
-                                        event.target.value
-                                      )
-                                    }
-                                    prefix={
-                                      <KeyRound aria-hidden="true" size={16} />
-                                    }
-                                    value={settingsState.apiKey}
-                                  />
-                                </Form.Item>
-                                <Form.Item
-                                  label="代理"
-                                  htmlFor="publisher-proxy-url"
-                                >
-                                  <Input
-                                    id="publisher-proxy-url"
-                                    onChange={(event) =>
-                                      updateSetting(
-                                        'proxyUrl',
-                                        event.target.value
-                                      )
-                                    }
-                                    placeholder="http://127.0.0.1:7890"
-                                    type="url"
-                                    value={settingsState.proxyUrl}
-                                  />
-                                </Form.Item>
-                              </div>
-                            ),
-                            key: 'wechat-api',
-                            label: '接口发布（可选）',
-                          },
-                        ]}
-                      />
-                    </Form>
-                  ) : (
-                    <Form layout="vertical" size="middle">
-                      <Form.Item label="文章分类">
-                        <Input
-                          onChange={(event) =>
-                            updateContentOption('category', event.target.value)
-                          }
-                          placeholder="例如：前端"
-                          value={contentOptions[selectedPlatformId].category}
-                        />
-                      </Form.Item>
-                      <Form.Item label="标签">
-                        <Input
-                          onChange={(event) =>
-                            updateContentOption('tags', event.target.value)
-                          }
-                          placeholder="多个标签用逗号分隔"
-                          value={contentOptions[selectedPlatformId].tags}
-                        />
-                      </Form.Item>
-                      <Form.Item label="摘要">
-                        <Input.TextArea
-                          onChange={(event) =>
-                            updateContentOption('summary', event.target.value)
-                          }
-                          placeholder="用于平台发布页的文章摘要"
-                          rows={3}
-                          value={contentOptions[selectedPlatformId].summary}
-                        />
-                      </Form.Item>
-                    </Form>
-                  )}
-                </div>
-
-                <div className="panel-block">
-                  <div className="panel-heading">
-                    <Space size={8}>
-                      <WandSparkles
-                        aria-hidden="true"
-                        size={16}
-                        strokeWidth={1.8}
-                      />
-                      <Typography.Text strong>发布工具</Typography.Text>
-                    </Space>
-                  </div>
-                  <Space
-                    className="action-row"
-                    orientation="vertical"
-                    size={12}
-                  >
-                    <Button
-                      block
-                      icon={<FileText aria-hidden="true" size={16} />}
-                      onClick={handlePreflight}
-                    >
-                      发布预检
-                    </Button>
-                    {selectedPlatformId !== 'wechat' && (
-                      <>
-                        <div className="copy-action-grid">
-                          <Button
-                            icon={<Copy aria-hidden="true" size={15} />}
-                            loading={activeQuickAction === 'copy-title'}
-                            onClick={() => void handleCopyContent('title')}
-                          >
-                            复制标题
-                          </Button>
-                          <Button
-                            icon={<Copy aria-hidden="true" size={15} />}
-                            loading={activeQuickAction === 'copy-body'}
-                            onClick={() => void handleCopyContent('body')}
-                          >
-                            复制正文
-                          </Button>
-                        </div>
                         <Button
                           block
-                          icon={<Copy aria-hidden="true" size={16} />}
-                          loading={activeQuickAction === 'copy-all'}
-                          onClick={() => void handleCopyContent('all')}
+                          icon={<FileText aria-hidden="true" size={16} />}
+                          onClick={handlePreflight}
                         >
-                          复制标题和正文
+                          发布预检
                         </Button>
-                      </>
-                    )}
-                    {isRealPublishPlatform(selectedPlatformId) && (
-                      <Button
-                        block
-                        icon={<ExternalLink aria-hidden="true" size={16} />}
-                        loading={activeQuickAction === 'open-publisher'}
-                        onClick={() => void handleOpenPublisher()}
-                      >
-                        打开{selectedPlatform.name}创作中心
-                      </Button>
-                    )}
-                  </Space>
+                        {selectedPlatformId !== 'wechat' && (
+                          <>
+                            <div className="copy-action-grid">
+                              <Button
+                                icon={<Copy aria-hidden="true" size={15} />}
+                                loading={activeQuickAction === 'copy-title'}
+                                onClick={() => void handleCopyContent('title')}
+                              >
+                                复制标题
+                              </Button>
+                              <Button
+                                icon={<Copy aria-hidden="true" size={15} />}
+                                loading={activeQuickAction === 'copy-body'}
+                                onClick={() => void handleCopyContent('body')}
+                              >
+                                复制正文
+                              </Button>
+                            </div>
+                            <Button
+                              block
+                              icon={<Copy aria-hidden="true" size={16} />}
+                              loading={activeQuickAction === 'copy-all'}
+                              onClick={() => void handleCopyContent('all')}
+                            >
+                              复制标题和正文
+                            </Button>
+                            <Button
+                              block
+                              icon={<Cloud aria-hidden="true" size={16} />}
+                              loading={isSyncingDraft}
+                              onClick={() => void handleSyncDraft()}
+                            >
+                              同步草稿
+                            </Button>
+                          </>
+                        )}
+                        {isRealPublishPlatform(selectedPlatformId) && (
+                          <Button
+                            block
+                            icon={<ExternalLink aria-hidden="true" size={16} />}
+                            loading={activeQuickAction === 'open-publisher'}
+                            onClick={() => void handleOpenPublisher()}
+                          >
+                            打开{selectedPlatform.name}创作中心
+                          </Button>
+                        )}
+                      </Space>
 
-                  {validation && (
-                    <Alert
-                      className="status-alert"
-                      description={
-                        validation.ok
-                          ? validation.warnings.length > 0
-                            ? validation.warnings.join('；')
-                            : '当前文章可以进入发布流程'
-                          : validation.errors.join('；')
-                      }
-                      showIcon
-                      title={validation.ok ? '预检通过' : '预检未通过'}
-                      type={validation.ok ? 'success' : 'error'}
-                    />
-                  )}
-                </div>
+                      {draftSyncStatus && (
+                        <Alert
+                          className="status-alert"
+                          description={draftSyncStatus.message}
+                          showIcon
+                          type={draftSyncStatus.success ? 'success' : 'error'}
+                        />
+                      )}
+
+                      {validation && (
+                        <Alert
+                          className="status-alert"
+                          description={
+                            validation.ok
+                              ? validation.warnings.length > 0
+                                ? validation.warnings.join('；')
+                                : '当前文章可以进入发布流程'
+                              : validation.errors.join('；')
+                          }
+                          showIcon
+                          title={validation.ok ? '预检通过' : '预检未通过'}
+                          type={validation.ok ? 'success' : 'error'}
+                        />
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
 
-          <div className="publish-panel-footer">
-            {publishPanelView === 'distribution' ? (
-              <Button
-                block
-                disabled={
-                  selectedDistributionCount === 0 ||
-                  isPreparing ||
-                  isBatchPreparing
-                }
-                icon={<Send aria-hidden="true" size={16} />}
-                loading={isBatchPreparing}
-                onClick={() => void handleBatchPrepare()}
-                type="primary"
-              >
-                一键准备 {selectedDistributionCount} 个平台草稿
-              </Button>
-            ) : isRealPublishPlatform(selectedPlatformId) ? (
-              <Button
-                block
-                disabled={isPreparing || isBatchPreparing}
-                icon={<Send aria-hidden="true" size={16} />}
-                loading={isPreparing}
-                onClick={() => void handlePreparePublisher()}
-                type="primary"
-              >
-                准备{selectedPlatform.name}草稿
-              </Button>
-            ) : (
-              <Button
-                block
-                icon={<ExternalLink aria-hidden="true" size={16} />}
-                loading={activeQuickAction === 'open-publisher'}
-                onClick={() => void handleOpenPublisher()}
-                type="primary"
-              >
-                打开{selectedPlatform.name}创作中心
-              </Button>
-            )}
-          </div>
-        </aside>
+              <div className="publish-panel-footer">
+                {publishPanelView === 'distribution' ? (
+                  <Button
+                    block
+                    disabled={
+                      selectedDistributionCount === 0 ||
+                      isPreparing ||
+                      isBatchPreparing
+                    }
+                    icon={<Send aria-hidden="true" size={16} />}
+                    loading={isBatchPreparing}
+                    onClick={() => void handleBatchPrepare()}
+                    type="primary"
+                  >
+                    一键准备 {selectedDistributionCount} 个平台草稿
+                  </Button>
+                ) : isRealPublishPlatform(selectedPlatformId) ? (
+                  <Button
+                    block
+                    disabled={isPreparing || isBatchPreparing}
+                    icon={<Send aria-hidden="true" size={16} />}
+                    loading={isPreparing}
+                    onClick={() => void handlePreparePublisher()}
+                    type="primary"
+                  >
+                    准备{selectedPlatform.name}草稿
+                  </Button>
+                ) : (
+                  <Button
+                    block
+                    icon={<ExternalLink aria-hidden="true" size={16} />}
+                    loading={activeQuickAction === 'open-publisher'}
+                    onClick={() => void handleOpenPublisher()}
+                    type="primary"
+                  >
+                    打开{selectedPlatform.name}创作中心
+                  </Button>
+                )}
+              </div>
+            </aside>
+          </>
+        ) : (
+          <section className="workspace studio-workspace" aria-label="功能页面">
+            <StudioPage
+              page={studioPage}
+              markdown={markdown}
+              onOpenArticle={handleOpenArticle}
+            />
+          </section>
+        )}
       </main>
     </ConfigProvider>
   )

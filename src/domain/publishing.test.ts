@@ -17,6 +17,11 @@ describe('文章发布领域模型', () => {
       'toutiao',
       'juejin',
       'csdn',
+      'medium',
+      'weibo',
+      'bilibili',
+      'yuque',
+      'baijiahao',
     ])
   })
 

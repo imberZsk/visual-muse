@@ -30,9 +30,7 @@ describe('Visual Muse 工作台', () => {
     expect(screen.getByRole('button', { name: '知乎' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '今日头条' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'CSDN' })).toBeInTheDocument()
-    expect(
-      screen.queryByRole('button', { name: 'Medium' })
-    ).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Medium' })).toBeInTheDocument()
   })
 
   test('可以切换浅色主题', async () => {

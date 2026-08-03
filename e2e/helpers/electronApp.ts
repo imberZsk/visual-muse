@@ -19,7 +19,8 @@ export function museTest(
   run: (
     page: Page,
     app: ElectronApplication,
-    testInfo: TestInfo
+    testInfo: TestInfo,
+    userDataPath: string
   ) => Promise<void>
 ) {
   test(title, async ({ browserName }, testInfo) => {
@@ -37,6 +38,8 @@ export function museTest(
         ...process.env,
         NODE_ENV: 'production',
         VISUAL_MUSE_E2E: '1',
+        // 兼容功能工作台原有隐藏窗口开关，全部 Electron E2E 都不得抢占焦点。
+        VISUAL_MUSE_HEADLESS: '1',
       },
     })
     // page 存储应用主窗口对应的 Playwright 页面。
@@ -44,7 +47,7 @@ export function museTest(
     await expect(page.getByTestId('app-shell')).toBeVisible()
     await expect(page.getByLabel('Markdown 编辑器')).toBeVisible()
     try {
-      await run(page, app, testInfo)
+      await run(page, app, testInfo, userDataPath)
     } finally {
       await app.close()
       await rm(userDataPath, { recursive: true, force: true })

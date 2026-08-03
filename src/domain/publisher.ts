@@ -1,7 +1,17 @@
 import { marked } from 'marked'
 
 export type PlatformId =
-  'wechat' | 'xiaohongshu' | 'zhihu' | 'toutiao' | 'juejin' | 'csdn'
+  | 'wechat'
+  | 'xiaohongshu'
+  | 'zhihu'
+  | 'toutiao'
+  | 'juejin'
+  | 'csdn'
+  | 'medium'
+  | 'weibo'
+  | 'bilibili'
+  | 'yuque'
+  | 'baijiahao'
 
 export interface PublishPlatform {
   /** 平台唯一标识，用于保存配置和生成发布记录。 */
@@ -146,6 +156,36 @@ export const publishingPlatforms: PublishPlatform[] = [
     id: 'csdn',
     name: 'CSDN',
     capability: '保留 Markdown 与代码块结构，生成技术博客发布记录。',
+    supportsSimulation: true,
+  },
+  {
+    id: 'medium',
+    name: 'Medium',
+    capability: '生成英文内容平台友好的 HTML 预览与发布记录。',
+    supportsSimulation: true,
+  },
+  {
+    id: 'weibo',
+    name: '微博',
+    capability: '通过持久登录窗口准备微博内容并保存草稿。',
+    supportsSimulation: true,
+  },
+  {
+    id: 'bilibili',
+    name: 'B 站',
+    capability: '准备 B 站专栏内容并通过持久登录窗口同步草稿。',
+    supportsSimulation: true,
+  },
+  {
+    id: 'yuque',
+    name: '语雀',
+    capability: '保留 Markdown 结构并同步到语雀文档编辑器。',
+    supportsSimulation: true,
+  },
+  {
+    id: 'baijiahao',
+    name: '百家号',
+    capability: '准备百家号图文内容并通过平台窗口同步草稿。',
     supportsSimulation: true,
   },
 ]
