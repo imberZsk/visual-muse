@@ -7,6 +7,23 @@ interface VisualMuseStoreState {
   settings: Record<string, string>
 }
 
+interface RealPublishRequest {
+  /** 目标平台标识。 */
+  platformId: 'xiaohongshu' | 'juejin' | 'wechat'
+  /** 文章标题。 */
+  title: string
+  /** Markdown 正文。 */
+  markdown: string
+  /** 富文本正文 HTML。 */
+  html: string
+  /** 平台分类。 */
+  category: string
+  /** 平台标签。 */
+  tags: string[]
+  /** 平台摘要。 */
+  summary: string
+}
+
 /**
  * 暴露安全的 preload API；无参数，当前阶段仅提供运行环境探针。
  */
@@ -49,6 +66,11 @@ function exposePreloadApi(): void {
      */
     openPublisher: async (platformId: string): Promise<void> =>
       ipcRenderer.invoke('visual-muse:open-publisher', platformId),
+    /**
+     * 打开持久平台会话并填充文章；`request` 是已经在渲染层预检的文章数据。
+     */
+    preparePublisher: async (request: RealPublishRequest) =>
+      ipcRenderer.invoke('visual-muse:prepare-publisher', request),
   })
 }
 

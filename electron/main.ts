@@ -3,9 +3,22 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadAutoUpdater } from './appUpdater.js'
+import {
+  PlatformPublisher,
+  realPublisherUrlMap,
+  type RealPublishPlatformId,
+} from './platformPublisher.js'
 
 /** 本地状态文件名，用于保存主题和发布配置。 */
 const stateFileName = 'visual-muse-state.json'
+/** DEVELOPMENT_APP_ICON_PATH 存储开发态窗口和 macOS Dock 使用的高清项目图标路径。 */
+const DEVELOPMENT_APP_ICON_PATH = fileURLToPath(
+  new URL('../build/icon.png', import.meta.url)
+)
+/** 是否正在执行必须隐藏窗口的 Playwright Electron 测试。 */
+const isE2E = process.env.VISUAL_MUSE_E2E === '1'
+/** 平台发布窗口使用的持久会话分区前缀。 */
+const publisherSessionPartitionPrefix = 'persist:visual-muse-publisher-'
 
 /** 安装包是否已完整下载，用于阻止提前安装。 */
 let updateDownloaded = false
@@ -20,12 +33,63 @@ const autoUpdater = await loadAutoUpdater(
 /** 平台创作入口白名单，用于限制渲染进程只能打开已审核的 HTTPS 地址。 */
 const publisherUrlMap: Record<string, string> = {
   wechat: 'https://mp.weixin.qq.com/',
+  xiaohongshu: 'https://creator.xiaohongshu.com/publish/publish',
   zhihu: 'https://www.zhihu.com/creator',
   toutiao: 'https://mp.toutiao.com/',
   juejin: 'https://juejin.cn/editor/drafts/new?v=2',
   csdn: 'https://editor.csdn.net/md/',
-  medium: 'https://medium.com/new-story',
 }
+
+/** E2E 平台页面使用的最小编辑器 HTML，避免测试访问真实平台或显示窗口。 */
+const publisherE2EHtmlMap: Record<RealPublishPlatformId, string> = {
+  xiaohongshu:
+    '<!doctype html><input placeholder="输入标题"><div contenteditable="true" role="textbox"></div>',
+  juejin:
+    '<!doctype html><input placeholder="输入文章标题..."><div class="CodeMirror"><textarea></textarea></div>',
+  wechat:
+    '<!doctype html><textarea placeholder="请在这里输入标题"></textarea><div contenteditable="true" role="textbox"></div>',
+}
+
+/** 构建 E2E 本地编辑器地址；`html` 是不会访问外网的静态页面内容。 */
+function buildPublisherE2EUrl(html: string): string {
+  return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`
+}
+
+/** 发布入口表，E2E 使用本地页面，真实应用仅访问平台白名单。 */
+const activePublisherUrlMap: Record<RealPublishPlatformId, string> = isE2E
+  ? {
+      xiaohongshu: buildPublisherE2EUrl(publisherE2EHtmlMap.xiaohongshu),
+      juejin: buildPublisherE2EUrl(publisherE2EHtmlMap.juejin),
+      wechat: buildPublisherE2EUrl(publisherE2EHtmlMap.wechat),
+    }
+  : realPublisherUrlMap
+
+/** 平台发布管理器，负责复用登录会话并自动填充官方编辑器。 */
+const platformPublisher = new PlatformPublisher(
+  ({ platformId }) => {
+    // 平台发布窗口，保存隔离于主工作台的官方创作页面。
+    const publisherWindow = new BrowserWindow({
+      width: 1280,
+      height: 900,
+      minWidth: 960,
+      minHeight: 680,
+      show: !isE2E,
+      title: `Visual Muse - ${platformId}`,
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        partition: `${publisherSessionPartitionPrefix}${platformId}`,
+      },
+    })
+
+    return publisherWindow
+  },
+  activePublisherUrlMap,
+  !isE2E
+)
+/** 主工作台窗口，供 macOS Dock 激活时区分平台编辑窗口与产品主窗口。 */
+let mainWindow: BrowserWindow | null = null
 
 /**
  * 获取状态文件路径；无参数，返回 Electron userData 目录下的 JSON 文件路径。
@@ -139,30 +203,46 @@ function registerIpcHandlers(): void {
       await shell.openExternal(publisherUrl)
     }
   )
+  ipcMain.handle(
+    'visual-muse:prepare-publisher',
+    async (_event, request: unknown) => platformPublisher.prepare(request)
+  )
 }
 
 /**
  * 创建 Electron 主窗口；无参数，负责加载开发服务器或打包后的静态页面。
  */
 function createWindow(): void {
+  // macOS 业务场景：主窗口仍存在但被隐藏时，Dock 激活应直接恢复而不是创建重复窗口。
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show()
+    mainWindow.focus()
+    return
+  }
   // 当前模块文件路径，用于推导 preload 脚本位置。
   const currentFilePath = fileURLToPath(import.meta.url)
   // 当前模块目录路径，用于定位构建产物。
   const currentDirPath = path.dirname(currentFilePath)
   // 主窗口实例，承载 Visual Muse 渲染进程。
-  const mainWindow = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1440,
     height: 940,
     minWidth: 1120,
     minHeight: 720,
     title: 'Visual Muse',
-    backgroundColor: '#020617',
+    backgroundColor: '#141414',
+    icon: app.isPackaged ? undefined : DEVELOPMENT_APP_ICON_PATH,
+    // E2E 仍创建真实渲染进程，但隐藏窗口以避免抢占用户桌面焦点。
+    show: !isE2E,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
       // Bug 修复：项目为 ESM，编译后的 preload.js 无法在当前隔离上下文稳定执行；CommonJS preload 确保 IPC 桥真实暴露。
       preload: path.join(currentDirPath, '../electron/preload.cjs'),
     },
+  })
+  mainWindow.on('closed', () => {
+    mainWindow = null
   })
 
   // 开发环境加载 Vite 服务，生产环境加载本地 HTML。
@@ -176,13 +256,17 @@ function createWindow(): void {
 registerIpcHandlers()
 
 void app.whenReady().then(() => {
+  // macOS E2E 隐藏 Dock 图标，避免后台测试切换用户当前操作的前台应用。
+  if (isE2E) app.dock?.hide()
+  // Bug 修复：未打包 Electron 默认显示框架图标；开发态显式设置项目图标，打包态继续使用安装包资源。
+  if (process.platform === 'darwin' && !app.isPackaged && !isE2E) {
+    app.dock?.setIcon(DEVELOPMENT_APP_ICON_PATH)
+  }
   createWindow()
 
   app.on('activate', () => {
-    // macOS 业务场景：Dock 图标唤起时，如果没有窗口则重新创建。
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow()
-    }
+    // Bug 修复：平台窗口会让全局窗口数大于零；应按主工作台本身是否存在决定恢复或重建。
+    createWindow()
   })
 })
 

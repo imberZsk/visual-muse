@@ -123,23 +123,28 @@ describe('发布领域模型边界分支', () => {
     })
   })
 
-  test('无标题文章生成载荷时使用未命名兜底', () => {
-    // 无标题普通图文，用来覆盖 resolveTitle 的兜底分支。
+  test('无 frontmatter 文章生成载荷时使用一级标题', () => {
+    // 含一级标题的普通图文，用来覆盖 resolveTitle 的 Markdown 标题兜底分支。
     const article = parseArticleMarkdown('# 只有正文')
-    // 生成的公众号载荷，用来断言标题回退为未命名文章。
+    // 生成的公众号载荷，用来断言标题回退为正文一级标题。
     const payload = buildWechatDraftPayload(article)
 
     expect(payload).toMatchObject({ kind: 'article' })
     if (payload.kind === 'article') {
-      expect(payload.articles[0].title).toBe('未命名文章')
+      expect(payload.articles[0].title).toBe('只有正文')
     }
   })
 
   test('模拟发布返回 ISO 时间戳', () => {
     // 可发布文章，用来验证 simulatePublish 的 createdAt 为合法 ISO 字符串。
     const article = parseArticleMarkdown(`---\ntitle: 时间戳文章\n---\n\n正文`)
+    // 掘金平台，按语义标识查找以避免新增导航项改变数组下标。
+    const juejinPlatform = publishingPlatforms.find(
+      (platform) => platform.id === 'juejin'
+    )
+    if (!juejinPlatform) throw new Error('缺少掘金平台测试数据')
     // 模拟发布结果，用来断言时间字段可被 Date 解析。
-    const result = simulatePublish(publishingPlatforms[3], article)
+    const result = simulatePublish(juejinPlatform, article)
 
     expect(result.platformId).toBe('juejin')
     expect(Number.isNaN(Date.parse(result.createdAt))).toBe(false)

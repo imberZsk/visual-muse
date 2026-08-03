@@ -22,6 +22,9 @@ const visualMuseDesktop = {
   /** 打开平台创作入口；platformId 为主进程白名单中的平台标识。 */
   openPublisher: async (platformId) =>
     ipcRenderer.invoke('visual-muse:open-publisher', platformId),
+  /** 打开持久平台会话并填充文章；request 为经过渲染层预检的文章数据。 */
+  preparePublisher: async (request) =>
+    ipcRenderer.invoke('visual-muse:prepare-publisher', request),
 }
 
 contextBridge.exposeInMainWorld('visualMuseRuntime', {

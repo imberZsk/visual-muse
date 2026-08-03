@@ -2,6 +2,12 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import App from './App'
 
+/** 打开公众号可选接口配置，用于需要读写历史凭据的测试场景。 */
+function openWechatApiSettings(): void {
+  fireEvent.click(screen.getByRole('button', { name: '微信公众号' }))
+  fireEvent.click(screen.getByText('接口发布（可选）', { exact: true }))
+}
+
 // 该文件补充 App 组件的交互分支：Web 环境降级、复制失败、复制标题/全部、预检警告与配置输入。
 describe('Visual Muse 工作台交互分支', () => {
   beforeEach(() => {
@@ -25,7 +31,7 @@ describe('Visual Muse 工作台交互分支', () => {
     render(<App />)
 
     await screen.findByLabelText('Markdown 编辑器')
-    fireEvent.click(screen.getByRole('button', { name: /掘金/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^掘金$/ }))
     fireEvent.click(screen.getByRole('button', { name: '复制正文' }))
 
     await waitFor(() =>
@@ -47,7 +53,7 @@ describe('Visual Muse 工作台交互分支', () => {
     render(<App />)
 
     await screen.findByLabelText('Markdown 编辑器')
-    fireEvent.click(screen.getByRole('button', { name: /知乎/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^知乎$/ }))
     fireEvent.click(screen.getByRole('button', { name: '复制标题' }))
 
     await waitFor(() =>
@@ -67,7 +73,7 @@ describe('Visual Muse 工作台交互分支', () => {
     render(<App />)
 
     await screen.findByLabelText('Markdown 编辑器')
-    fireEvent.click(screen.getByRole('button', { name: /CSDN/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^CSDN$/ }))
     fireEvent.click(screen.getByRole('button', { name: '复制标题和正文' }))
 
     await waitFor(() =>
@@ -91,7 +97,7 @@ describe('Visual Muse 工作台交互分支', () => {
     render(<App />)
 
     await screen.findByLabelText('Markdown 编辑器')
-    fireEvent.click(screen.getByRole('button', { name: /Medium/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^CSDN$/ }))
     fireEvent.click(screen.getByRole('button', { name: '复制正文' }))
 
     expect(
@@ -106,7 +112,7 @@ describe('Visual Muse 工作台交互分支', () => {
     render(<App />)
 
     await screen.findByLabelText('Markdown 编辑器')
-    fireEvent.click(screen.getByRole('button', { name: /今日头条/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^今日头条$/ }))
     fireEvent.click(
       screen.getByRole('button', { name: '打开今日头条创作中心' })
     )
@@ -133,7 +139,7 @@ describe('Visual Muse 工作台交互分支', () => {
     render(<App />)
 
     await screen.findByLabelText('Markdown 编辑器')
-    fireEvent.click(screen.getByRole('button', { name: /知乎/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^知乎$/ }))
     fireEvent.click(screen.getByRole('button', { name: '打开知乎创作中心' }))
 
     expect(
@@ -149,6 +155,7 @@ describe('Visual Muse 工作台交互分支', () => {
     fireEvent.change(editor, {
       target: { value: '---\ntitle: 只有标题\n---\n\n纯文字正文' },
     })
+    fireEvent.click(screen.getByRole('radio', { name: '平台设置' }))
     fireEvent.click(screen.getByRole('button', { name: '发布预检' }))
 
     expect(await screen.findByText('预检通过')).toBeInTheDocument()
@@ -163,10 +170,11 @@ describe('Visual Muse 工作台交互分支', () => {
     fireEvent.change(editor, {
       target: { value: '---\ntitle: 有封面\ncover: ./c.png\n---\n\n正文' },
     })
+    fireEvent.click(screen.getByRole('radio', { name: '平台设置' }))
     fireEvent.click(screen.getByRole('button', { name: '发布预检' }))
 
     expect(
-      await screen.findByText('当前文章可以进入模拟发布流程')
+      await screen.findByText('当前文章可以进入发布流程')
     ).toBeInTheDocument()
   })
 
@@ -174,6 +182,7 @@ describe('Visual Muse 工作台交互分支', () => {
     render(<App />)
 
     await screen.findByLabelText('Markdown 编辑器')
+    openWechatApiSettings()
     // AppID 输入框，通过 autocomplete 属性定位（antd Form.Item 的 label 未用 for 关联）。
     const appIdInput = document.querySelector<HTMLInputElement>(
       'input[autocomplete="username"]'
@@ -196,7 +205,7 @@ describe('Visual Muse 工作台交互分支', () => {
     render(<App />)
 
     await screen.findByLabelText('Markdown 编辑器')
-    fireEvent.click(screen.getByRole('button', { name: /知乎/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^知乎$/ }))
     // 文章分类输入框，通过 placeholder 定位后验证 updateContentOption 更新对应平台选项。
     const categoryInput = screen.getByPlaceholderText('例如：前端')
     fireEvent.change(categoryInput, { target: { value: '前端工程' } })
@@ -224,6 +233,7 @@ describe('Visual Muse 工作台交互分支', () => {
     render(<App />)
 
     await screen.findByLabelText('Markdown 编辑器')
+    openWechatApiSettings()
     expect(await screen.findByDisplayValue('restored-id')).toBeInTheDocument()
     await waitFor(() =>
       expect(screen.getByTestId('app-shell')).toHaveAttribute(
@@ -258,6 +268,7 @@ describe('Visual Muse 工作台交互分支', () => {
     render(<App />)
 
     await screen.findByLabelText('Markdown 编辑器')
+    openWechatApiSettings()
     // AppID 输入框，通过 autocomplete 属性定位后修改以触发自动保存。
     const appIdInput = document.querySelector<HTMLInputElement>(
       'input[autocomplete="username"]'
@@ -276,17 +287,27 @@ describe('Visual Muse 工作台交互分支', () => {
     delete window.visualMuseStore
   })
 
-  test('缺少标题时模拟发布被阻止且不生成记录', async () => {
+  test('缺少标题时批量准备被阻止且不调用真实平台', async () => {
+    // 平台准备探针，用来确认三平台预检失败时不会打开任何官方编辑器。
+    const preparePublisher = vi.fn()
+    window.visualMuseDesktop = {
+      copyText: vi.fn().mockResolvedValue(undefined),
+      openPublisher: vi.fn().mockResolvedValue(undefined),
+      preparePublisher,
+    }
     render(<App />)
 
-    // Markdown 输入框，用来粘贴缺少标题的文章，覆盖 handleSimulatePublish 的校验失败 return 分支。
+    // Markdown 输入框，用来粘贴既无 frontmatter 又无一级标题的文章，覆盖三平台阻断分支。
     const editor = await screen.findByLabelText('Markdown 编辑器')
-    fireEvent.change(editor, { target: { value: '# 无标题正文' } })
-    fireEvent.click(screen.getByRole('button', { name: '模拟发布' }))
+    fireEvent.change(editor, { target: { value: '无标题正文' } })
+    fireEvent.click(
+      screen.getByRole('button', { name: '一键准备 3 个平台草稿' })
+    )
 
-    expect(await screen.findByText('缺少文章标题')).toBeInTheDocument()
-    // 业务场景：校验未通过时不应写入发布历史，仍展示空记录占位。
-    expect(screen.getByText('暂无发布记录')).toBeInTheDocument()
+    expect(
+      await screen.findByText('已准备 0/3 个平台草稿，请处理异常项后重试')
+    ).toBeInTheDocument()
+    expect(preparePublisher).not.toHaveBeenCalled()
   })
 
   test('图片消息文章预览展示图片列表', async () => {

@@ -20,6 +20,34 @@ interface VisualMuseStoreState {
   }
 }
 
+interface RealPublishRequest {
+  /** 目标平台标识。 */
+  platformId: 'xiaohongshu' | 'juejin' | 'wechat'
+  /** 文章标题。 */
+  title: string
+  /** Markdown 正文。 */
+  markdown: string
+  /** 富文本正文 HTML。 */
+  html: string
+  /** 平台分类。 */
+  category: string
+  /** 平台标签。 */
+  tags: string[]
+  /** 平台摘要。 */
+  summary: string
+}
+
+interface RealPublishPreparationResult {
+  /** 发布窗口当前状态。 */
+  status: 'prepared' | 'saved' | 'login-required' | 'not-ready'
+  /** 目标平台标识。 */
+  platformId: 'xiaohongshu' | 'juejin' | 'wechat'
+  /** 面向用户的下一步说明。 */
+  message: string
+  /** 不包含凭据的官方页面地址。 */
+  url: string
+}
+
 interface Window {
   /** Electron preload 暴露的剪贴板与平台入口 API。 */
   visualMuseDesktop?: {
@@ -37,6 +65,10 @@ interface Window {
     copyText: (text: string) => Promise<void>
     /** 打开平台创作入口；`platformId` 是平台标识。 */
     openPublisher: (platformId: string) => Promise<void>
+    /** 打开持久平台会话并填充文章；`request` 是经过预检的文章数据。 */
+    preparePublisher?: (
+      request: RealPublishRequest
+    ) => Promise<RealPublishPreparationResult>
   }
   /** Electron preload 暴露的本地状态存储 API。 */
   visualMuseStore?: {
