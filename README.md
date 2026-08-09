@@ -2,7 +2,7 @@
 
 Visual Muse 是一个 Electron 桌面工作台，用于整理文章素材、编辑发布内容，并维护多平台发布前的本地配置。
 
-产品介绍：<https://visual-worktree-docs.netlify.app/products/?product=visual-muse>
+产品介绍：<https://imber-visual-docs.netlify.app/visual-muse>
 
 ## 技术栈
 
